@@ -1,0 +1,25 @@
+# Weekly update PRs, grouped per ecosystem so they stay reviewable.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups: { actions: { patterns: ["*"] } }
+  - package-ecosystem: uv
+    directory: /
+    schedule: { interval: weekly }
+    groups: { python: { patterns: ["*"] } }
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    groups: { js: { patterns: ["*"] } }
+  - package-ecosystem: cargo
+    directory: /apps/desktop/src-tauri
+    schedule: { interval: weekly }
+    groups: { rust: { patterns: ["*"] } }
+  - package-ecosystem: docker
+    directories: [/services/api, /services/pron]
+    schedule: { interval: weekly }
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule: { interval: weekly }

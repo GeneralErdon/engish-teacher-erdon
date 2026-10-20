@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python · ruff, mypy, import-linter, pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # uv version: `required-version` in pyproject.toml. Python: .python-version.
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+      - uses: extractions/setup-just@v4
+      - run: uv sync --all-packages --locked
+      - run: just check-py
+      - run: just test-py
+      # TODO(Phase 1): fail if `just types` would change apps/desktop/src/generated.
+      # TODO(Phase 2): fail if the README results block is out of date with eval/results/latest.json.
+
+  ui:
+    name: UI · eslint, tsc, prettier, vitest, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # pnpm version: package.json#packageManager. Node: .nvmrc.
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: extractions/setup-just@v4
+      - run: pnpm install --frozen-lockfile
+      - run: just check-ui
+      - run: just test-ui
+      - run: pnpm --filter @voice-tutor/desktop build
+
+  desktop:
+    name: Desktop · ${{ matrix.os }} · fmt, clippy, cargo test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      # Installs the toolchain pinned in rust-toolchain.toml (with rustfmt and clippy).
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: extractions/setup-just@v4
+      - run: pnpm install --frozen-lockfile
+      # tauri::generate_context!() embeds the built UI.
+      - run: pnpm --filter @voice-tutor/desktop build
+      - run: just check-rust
+      - run: just test-rust
+
+  docker:
+    name: Docker · compose config, build api and pron
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker compose --profile "*" config --quiet
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: services/api/Dockerfile
+          push: false
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: services/pron/Dockerfile
+          push: false
+          cache-from: type=gha,scope=pron
+          cache-to: type=gha,mode=max,scope=pron

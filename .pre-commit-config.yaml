@@ -1,0 +1,65 @@
+# Installed by `just setup` (uv run pre-commit install). Run everything: uv run pre-commit run -a
+# Hooks marked `language: system` use the project's own toolchain (uv / pnpm / cargo), so their
+# versions always match the lockfiles.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+        args: [--allow-multiple-documents]  # pnpm-lock.yaml is multi-document
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.13.3
+    hooks:
+      - id: uv-lock
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.1
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy --strict
+        entry: uv run mypy packages/contracts/src services/api/src services/pron/src
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: import-linter
+        name: import-linter (layering contracts)
+        entry: uv run lint-imports
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: eslint
+        name: eslint
+        entry: pnpm --filter @voice-tutor/desktop lint
+        language: system
+        files: ^apps/desktop/.*\.(ts|tsx)$
+        pass_filenames: false
+      - id: prettier
+        name: prettier
+        entry: pnpm --filter @voice-tutor/desktop format:check
+        language: system
+        files: ^apps/desktop/
+        exclude: ^apps/desktop/src-tauri/
+        pass_filenames: false
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+        language: system
+        files: ^apps/desktop/src-tauri/.*\.rs$
+        pass_filenames: false

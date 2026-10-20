@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Least privilege: the UI talks to the api over HTTP/WebSocket and calls no Tauri commands yet. Add the specific permission each feature needs; never whole plugin bundles you do not use.",
+  "windows": ["main"],
+  "permissions": []
+}

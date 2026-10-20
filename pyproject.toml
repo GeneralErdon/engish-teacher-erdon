@@ -1,0 +1,138 @@
+# uv workspace root (virtual: it is not a package itself).
+# Members: shared contracts + the two Python services. One lockfile (uv.lock) for all of them.
+
+[tool.uv]
+required-version = ">=0.13"
+
+[tool.uv.workspace]
+members = ["packages/*", "services/*"]
+
+# PEP 735 dependency groups. `uv sync` installs the `dev` group by default.
+[dependency-groups]
+dev = [
+    "hypothesis>=6.170.5",
+    "httpx2>=2.15.1",  # Starlette TestClient / ASGI client (pydantic fork of httpx)
+    "import-linter>=2.15",
+    "mypy>=2.4.0",
+    "pre-commit>=4.7.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.1",
+]
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+src = ["packages/*/src", "services/*/src"]
+extend-exclude = ["apps/"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",  # pycodestyle + pyflakes
+    "I",            # isort
+    "N",            # pep8-naming
+    "UP",           # pyupgrade
+    "B",            # bugbear
+    "C4",           # comprehensions
+    "SIM",          # simplify
+    "RET",          # return
+    "PIE",          # misc
+    "PTH",          # pathlib over os.path
+    "TID",          # tidy imports
+    "ASYNC",        # async pitfalls (blocking calls in the event loop)
+    "S",            # bandit (security)
+    "LOG", "G",     # logging
+    "PT",           # pytest style
+    "FAST",         # FastAPI
+    "RUF",          # ruff-specific
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101"]  # assert is how pytest works
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+known-first-party = ["vt_contracts", "vt_api", "vt_pron"]
+
+# ---------------------------------------------------------------- mypy
+# `just check` runs mypy once per workspace member (src + tests), so test modules
+# with the same name in different services never collide.
+[tool.mypy]
+python_version = "3.14"
+strict = true
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined"]
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest]
+minversion = "9.0"
+testpaths = ["packages/contracts/tests", "services/api/tests", "services/pron/tests"]
+addopts = ["-ra", "--import-mode=importlib"]
+filterwarnings = ["error"]
+strict = true
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+branch = true
+source = ["vt_contracts", "vt_api", "vt_pron"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]
+
+# ---------------------------------------------------------------- import-linter
+# Layering rules from docs/development.md. Run with `uv run lint-imports` (part of `just check`).
+[tool.importlinter]
+root_packages = ["vt_contracts", "vt_api", "vt_pron"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Domain is pure: no adapters, transport, wiring or web frameworks"
+type = "forbidden"
+source_modules = ["vt_api.domain"]
+forbidden_modules = [
+    "vt_api.adapters",
+    "vt_api.http",
+    "vt_api.realtime",
+    "vt_api.container",
+    "vt_api.main",
+    "fastapi",
+    "starlette",
+    "httpx",
+    "httpx2",
+]
+
+[[tool.importlinter.contracts]]
+name = "Adapters are wired only in container.py"
+type = "forbidden"
+source_modules = [
+    "vt_api.domain",
+    "vt_api.ports",
+    "vt_api.teacher",
+    "vt_api.realtime",
+    "vt_api.http",
+]
+forbidden_modules = ["vt_api.adapters"]
+
+[[tool.importlinter.contracts]]
+name = "Shared contracts depend on no service"
+type = "forbidden"
+source_modules = ["vt_contracts"]
+forbidden_modules = ["vt_api", "vt_pron"]
+
+[[tool.importlinter.contracts]]
+name = "Services are independent (they talk over HTTP, not imports)"
+type = "independence"
+modules = ["vt_api", "vt_pron"]

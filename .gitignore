@@ -1,0 +1,56 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Runtime data (notes, progress.db, recordings); keep the folder so bind mounts stay user-owned
+data/*
+!data/.gitkeep
+
+# Models and checkpoints (downloaded at runtime, never committed)
+/models/
+*.gguf
+*.onnx
+*.safetensors
+*.pt
+*.pth
+*.bin
+
+# Evaluation datasets (L2-ARCTIC is not redistributable)
+eval/datasets/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Node
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.vite/
+.pnpm-store/
+
+# Rust / Tauri
+target/
+apps/desktop/src-tauri/gen/schemas/
+
+# Editors and OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+.DS_Store
+Thumbs.db

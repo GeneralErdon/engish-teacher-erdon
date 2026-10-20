@@ -1,0 +1,186 @@
+# voice-tutor: the whole stack. Pick the hardware with a profile (docs/hardware.md):
+#
+#   docker compose --profile cpu up -d        # or: just up cpu
+#   docker compose --profile amd watch        # or: just watch amd  (rebuilds api/pron on change)
+#
+# api and pron always run. stt / llm / tts come from the profile; each variant answers on the
+# network as plain `stt`, `llm` or `tts`, so the api URLs in .env do not change between profiles.
+# Every port is published on 127.0.0.1 only: voice-tutor has no authentication.
+
+name: voice-tutor
+
+x-env-file: &env-file
+  env_file:
+    - path: .env
+      required: false
+
+x-model-healthcheck: &model-healthcheck
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  # First start downloads models (GBs); failures during this window do not count.
+  start_period: 1h
+  start_interval: 5s
+
+services:
+  # ------------------------------------------------------------------ our code
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    <<: *env-file
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      # `external` profile on Linux: reach Ollama / LM Studio running on the host.
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      pron: { condition: service_healthy }
+      stt-cpu: { condition: service_healthy, required: false }
+      stt-nvidia: { condition: service_healthy, required: false }
+      llm-cpu: { condition: service_healthy, required: false }
+      llm-nvidia: { condition: service_healthy, required: false }
+      llm-amd: { condition: service_healthy, required: false }
+      tts-cpu: { condition: service_healthy, required: false }
+      tts-nvidia: { condition: service_healthy, required: false }
+    restart: unless-stopped
+    develop:
+      watch:
+        - { action: rebuild, path: services/api/src }
+        - { action: rebuild, path: packages/contracts/src }
+        - { action: rebuild, path: apps/desktop/src }
+        - { action: rebuild, path: uv.lock }
+        - { action: rebuild, path: pnpm-lock.yaml }
+
+  pron:
+    build:
+      context: .
+      dockerfile: services/pron/Dockerfile
+    <<: *env-file
+    ports:
+      - "127.0.0.1:8001:8001"
+    restart: unless-stopped
+    develop:
+      watch:
+        - { action: rebuild, path: services/pron/src }
+        - { action: rebuild, path: packages/contracts/src }
+        - { action: rebuild, path: uv.lock }
+
+  # ------------------------------------------------------------------ speech-to-text (Speaches)
+  # TODO(Phase 1): download VT_STT_MODEL on first start (Speaches serves only downloaded models).
+  stt-cpu:
+    image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu
+    profiles: [cpu, amd, external]
+    networks: { default: { aliases: [stt] } }
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - stt-models:/home/ubuntu/.cache/huggingface/hub
+    healthcheck: &speaches-healthcheck
+      <<: *model-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+    restart: unless-stopped
+
+  stt-nvidia:
+    image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cuda
+    profiles: [nvidia]
+    networks: { default: { aliases: [stt] } }
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - stt-models:/home/ubuntu/.cache/huggingface/hub
+    gpus: all
+    healthcheck: *speaches-healthcheck
+    restart: unless-stopped
+
+  # TODO(Phase 1): `amd` can use whisper.cpp built with Vulkan (docker/whisper-vulkan) instead
+  # of Speaches on CPU; it needs VT_STT_BACKEND=whispercpp and the whisper.cpp adapter.
+
+  # ------------------------------------------------------------------ chat model
+  # llama.cpp server: downloads VT_LLM_HF_REPO from Hugging Face on first start and serves it
+  # under the name VT_LLM_MODEL (what the api sends in its requests).
+  llm-cpu:
+    image: ghcr.io/ggml-org/llama.cpp:server-b11749
+    profiles: [cpu]
+    networks: { default: { aliases: [llm] } }
+    environment: &llama-env
+      LLAMA_ARG_HF_REPO: ${VT_LLM_HF_REPO:-ggml-org/gemma-3-4b-it-GGUF}
+      LLAMA_ARG_ALIAS: ${VT_LLM_MODEL:-gemma-3-4b-it-q4}
+      LLAMA_ARG_CTX_SIZE: ${VT_LLM_CTX_SIZE:-8192}
+      LLAMA_CACHE: /models
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - llm-models:/models
+    healthcheck: &llama-healthcheck
+      <<: *model-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+    restart: unless-stopped
+
+  llm-amd:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan-b11749
+    profiles: [amd]
+    networks: { default: { aliases: [llm] } }
+    environment:
+      <<: *llama-env
+      LLAMA_ARG_N_GPU_LAYERS: "999"
+    devices:
+      - /dev/dri:/dev/dri
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - llm-models:/models
+    healthcheck: *llama-healthcheck
+    restart: unless-stopped
+
+  # TODO(Phase 3): pull VT_LLM_MODEL into Ollama on first start (`ollama pull`).
+  llm-nvidia:
+    image: ollama/ollama:0.40.6
+    profiles: [nvidia]
+    networks: { default: { aliases: [llm] } }
+    environment:
+      # Same port as llama.cpp, so VT_LLM_BASE_URL stays http://llm:8080/v1.
+      OLLAMA_HOST: 0.0.0.0:8080
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - ollama:/root/.ollama
+    gpus: all
+    healthcheck:
+      <<: *model-healthcheck
+      test: ["CMD", "ollama", "list"]
+    restart: unless-stopped
+
+  # `external` has no llm service: point VT_LLM_BASE_URL at http://host.docker.internal:<port>/v1.
+
+  # ------------------------------------------------------------------ text-to-speech (Kokoro)
+  tts-cpu:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.0
+    profiles: [cpu, amd, external]
+    networks: { default: { aliases: [tts] } }
+    ports:
+      - "127.0.0.1:8880:8880"
+    healthcheck: &kokoro-healthcheck
+      <<: *model-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8880/health', timeout=3)"]
+    restart: unless-stopped
+
+  tts-nvidia:
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.9.0
+    profiles: [nvidia]
+    networks: { default: { aliases: [tts] } }
+    ports:
+      - "127.0.0.1:8880:8880"
+    gpus: all
+    healthcheck: *kokoro-healthcheck
+    restart: unless-stopped
+
+  # TODO(Phase 3): `https` profile with Caddy and its internal CA for LAN access
+  # (docker/caddy/Caddyfile, docs/hardware.md#remote-access).
+
+volumes:
+  stt-models:
+  llm-models:
+  ollama:
