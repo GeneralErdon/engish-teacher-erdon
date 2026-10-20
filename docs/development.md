@@ -128,8 +128,18 @@ def phoneme_posteriors(audio: Float[Tensor, "samples"]) -> Float[Tensor, "frames
 
 Coverage target: 85 % for `domain`, `teacher`, `vt_pron.scoring` and `vt_pron.alignment`. Do not chase coverage in adapters; contract tests matter more.
 
-## Commits and branches
+## Branches and commits (git flow)
 
-- Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
-- Small PRs, each with tests; `main` is always releasable.
+| Branch | Purpose | Branches from | Merges into |
+|---|---|---|---|
+| `master` | Released code only; every merge is tagged `vX.Y.Z` | — | — |
+| `develop` | Integration branch: the next release | `master` | — |
+| `feat/<short-name>` | One feature | `develop` | `develop` (PR) |
+| `fix/<short-name>` | One bug fix | `develop` | `develop` (PR) |
+| `release/X.Y.Z` | Freeze, version bump, changelog | `develop` | `master` + back into `develop` |
+| `hotfix/<short-name>` | Urgent fix on released code | `master` | `master` + `develop` |
+
+- Never commit directly to `master` or `develop`: open a PR, and merge it only with CI green.
+- Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `ci:`).
+- Small PRs, each with tests; `master` is always releasable.
 - Architecture changes get a short ADR appended to the table in [architecture.md](architecture.md#architecture-decisions-summary).

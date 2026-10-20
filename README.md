@@ -4,9 +4,27 @@
 
 Your audio never leaves your computer. No accounts, no telemetry, no subscriptions.
 
+> [!IMPORTANT]
+> **Early development.** The repository bootstrap (Phase -1) is done: the services, the desktop shell, Docker, CI and tooling all run, but the voice features below are the target, not yet built. Voice conversation lands in Phase 1. Track progress in [docs/roadmap.md](docs/roadmap.md).
+>
+> **What runs today:** the `api` and `pron` services (health endpoints), all model containers, and the UI (desktop window or browser) showing the backend status.
+
 ---
 
+## Contents
+
+- [Features](#features) · [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Run it with Docker](#run-it-with-docker)
+- [Run it locally (development)](#run-it-locally-development)
+- [Desktop app and installers](#desktop-app-and-installers)
+- [Configuration](#configuration) · [Hardware profiles](#pick-a-hardware-profile) · [Remote access](#using-it-from-another-device-phone-home-lab)
+- [Commands](#commands) · [Project layout](#project-layout) · [Troubleshooting](#troubleshooting)
+- [Results](#results) · [Limitations](#honest-limitations) · [Privacy](#privacy) · [License](#license)
+
 ## Features
+
+Planned scope (see [Status](#voice-tutor) above):
 
 | | |
 |---|---|
@@ -31,26 +49,176 @@ api (FastAPI) ── VAD · turn-taking · barge-in · teacher logic · notes ·
    └─► pron  pronunciation scoring (wav2vec2 phoneme recognition + alignment) — this repo
 ```
 
-Details: [docs/architecture.md](docs/architecture.md).
+It is a monorepo: the Python services live in a [uv](https://docs.astral.sh/uv/) workspace (`services/api`, `services/pron`, shared `packages/contracts`), and the UI and desktop shell in a [pnpm](https://pnpm.io/) workspace (`apps/desktop`). Details: [docs/architecture.md](docs/architecture.md).
 
-## Quick start
+## Requirements
 
-**Requirements:** Docker with Compose v2, ~10 GB of free disk for models, a microphone.
+**To run it** (backend + browser UI), you only need:
 
-1. Start the backend (models + API):
+- **Docker** Engine 25+ or Docker Desktop, with **Compose v2.30+** (`docker compose version`)
+- ~10 GB of free disk for images and models, and a microphone
 
-   ```bash
-   git clone https://github.com/GeneralErdon/voice-tutor.git
-   cd voice-tutor
-   cp .env.example .env          # pick your hardware profile and models
-   docker compose --profile cpu up -d   # the profile you set in VT_PROFILE: cpu | nvidia | amd | external
-   ```
+**To develop it or build the desktop app**, you also need the toolchain below. The versions are pinned in the repository, so the tools pick them up automatically:
 
-2. Use it:
-   - **Desktop (recommended):** install the app for your OS from the Releases page (Windows `.msi`/`.exe`, Linux `.AppImage`/`.deb`/`.rpm`). It connects to `http://localhost:8080` by default.
-   - **Browser / home lab:** open **http://localhost:8080** (the API also serves the same UI).
+| Tool | Version | Pinned in | Used for |
+|---|---|---|---|
+| [uv](https://docs.astral.sh/uv/) | ≥ 0.13 | `pyproject.toml` (`required-version`) | Python versions, virtualenv, dependencies, lockfile |
+| Python | 3.14 | `.python-version` (uv installs it for you) | `api`, `pron`, `contracts` |
+| [just](https://just.systems) | ≥ 1.47 | — | Task runner (the `justfile`), same commands on every OS |
+| Node.js | 24 LTS | `.nvmrc` | UI tooling |
+| [pnpm](https://pnpm.io/) | 12 | `package.json` (`packageManager`; pnpm switches itself to it) | UI dependencies |
+| Rust | 1.99.1 | `rust-toolchain.toml` (rustup installs it for you) | Tauri desktop shell |
+| Tauri system libraries | — | — | WebKitGTK on Linux, WebView2 on Windows |
+| Docker | as above | — | Model services during development |
 
-Models download on first start (progress is shown in the app and in `docker compose logs -f`).
+Why Python 3.14 and not 3.15: the pronunciation stack needs torch, onnxruntime and ctranslate2 wheels, which do not exist for 3.15 yet. See [docs/development.md](docs/development.md#toolchain) for every version decision.
+
+### Install the toolchain
+
+<details open>
+<summary><b>Linux (Fedora)</b></summary>
+
+```bash
+# uv and just (user-level, no sudo)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv tool install rust-just
+
+# Rust (user-level; rust-toolchain.toml selects the exact version)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Node 24 (any version manager works; nvm shown) and pnpm
+nvm install 24 && npm install -g pnpm
+
+# Tauri 2 system dependencies
+sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file \
+  libappindicator-gtk3-devel librsvg2-devel libxdo-devel
+sudo dnf group install c-development
+
+# Docker: https://docs.docker.com/engine/install/fedora/
+```
+
+</details>
+
+<details>
+<summary><b>Linux (Debian / Ubuntu)</b></summary>
+
+Same uv, just, Rust, Node and pnpm commands as Fedora, then:
+
+```bash
+sudo apt update
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+</details>
+
+<details>
+<summary><b>Windows 10/11</b></summary>
+
+```powershell
+winget install astral-sh.uv Casey.Just Rustlang.Rustup OpenJS.NodeJS.LTS pnpm.pnpm Docker.DockerDesktop
+```
+
+Also install the **Microsoft C++ Build Tools** ("Desktop development with C++"). WebView2 is preinstalled on Windows 10/11. The `justfile` runs its recipes with PowerShell.
+
+</details>
+
+<details>
+<summary><b>macOS</b> (not tested yet)</summary>
+
+```bash
+xcode-select --install
+brew install uv just rustup node@24 pnpm
+rustup-init
+```
+
+Docker Desktop has no GPU access on macOS: use the `external` profile with a native Ollama / LM Studio.
+
+</details>
+
+## Run it with Docker
+
+The whole stack in containers: `api` (which also serves the UI), `pron`, and the model services of your hardware profile.
+
+```bash
+git clone https://github.com/GeneralErdon/engish-teacher-erdon.git voice-tutor
+cd voice-tutor
+cp .env.example .env                  # pick VT_PROFILE and the models (comments explain each one)
+docker compose --profile cpu up -d    # use the profile you set: cpu | nvidia | amd | external
+```
+
+Or, with `just` installed: `just up` (it reads `VT_PROFILE` from `.env`, builds and waits until every service is healthy).
+
+Then open **http://localhost:8080**. Today it shows the backend status; voice arrives in Phase 1.
+
+The first start downloads several GB (images, then the chat model). Follow it with `docker compose logs -f`. Every port is published on `127.0.0.1` only:
+
+| Port | Service |
+|---|---|
+| 8080 | `api` + UI |
+| 8001 | `pron` |
+| 8000 | `stt` (Speaches) |
+| 8081 | `llm` (llama.cpp / Ollama) |
+| 8880 | `tts` (Kokoro) |
+
+Stop everything with `docker compose --profile "*" down` (or `just down`). Downloaded models stay in Docker volumes for the next start.
+
+## Run it locally (development)
+
+```bash
+git clone https://github.com/GeneralErdon/engish-teacher-erdon.git voice-tutor
+cd voice-tutor
+cp .env.example .env
+just setup          # uv sync (all Python packages) + pnpm install + pre-commit hooks
+just check          # optional: lint + type-check everything
+just test           # optional: every test suite
+```
+
+Then pick how much of the stack you need:
+
+| You want to | Run | Open |
+|---|---|---|
+| Work on the UI or the api (no models needed yet) | `just dev-api` and, in a second terminal, `just dev-ui` | http://localhost:1420 |
+| The full loop: models in Docker, api and UI local | `just dev` | http://localhost:1420 |
+| The desktop window | `just dev-api` (or `just models` + `just dev-api`), then `just desktop` | native window |
+| Production images with rebuild on change | `just watch` | http://localhost:8080 |
+
+- `just dev-api` runs uvicorn with auto-reload on http://localhost:8080 (API docs at `/docs`).
+- `just dev-ui` runs Vite with hot reload on http://localhost:1420.
+- `just dev` = `just models` (pron + model services in Docker, waits until healthy) + `dev-api` + `dev-ui` in parallel.
+- `just desktop` starts its own Vite, so do not run it together with `just dev` or `just dev-ui`: both want port 1420.
+
+Adding dependencies, code conventions, testing strategy and typing rules: [docs/development.md](docs/development.md).
+
+## Desktop app and installers
+
+There are **no precompiled installers yet**: the release workflow (`.github/workflows/release.yml`) publishes them, with the Docker images, from the first tagged release in Phase 3. Until then, build them on your machine:
+
+```bash
+just bundle
+```
+
+Output goes to `apps/desktop/src-tauri/target/release/bundle/`: `.deb`, `.rpm` and `.AppImage` on Linux; `.msi` and `.exe` (NSIS) on Windows. The app talks to the backend at `http://localhost:8080`, so start it with Docker or `just dev-api` first.
+
+## Configuration
+
+All settings live in `.env`, starting from [`.env.example`](.env.example). They are validated at startup, so a service refuses to boot with a clear message if something is wrong.
+
+| Variable | Default | Description |
+|---|---|---|
+| `VT_PROFILE` | `cpu` | Hardware profile (see below). |
+| `VT_LLM_BASE_URL` | `http://llm:8080/v1` | Any OpenAI-compatible chat endpoint. |
+| `VT_LLM_MODEL` | `gemma-3-4b-it-q4` | Model name as the endpoint expects it (`gemma-3-12b-it-q4` on a 12–16 GB GPU). |
+| `VT_LLM_API_KEY` | *(empty)* | Only for cloud providers. |
+| `VT_LLM_HF_REPO` | `ggml-org/gemma-3-4b-it-GGUF` | GGUF that llama.cpp downloads (`cpu` / `amd` profiles). |
+| `VT_STT_BASE_URL` | `http://stt:8000/v1` | Speech-to-text endpoint. |
+| `VT_STT_MODEL` | `large-v3-turbo` | Whisper variant (`.env.example` uses `small.en` for CPU). |
+| `VT_TTS_BASE_URL` | `http://tts:8880/v1` | Text-to-speech endpoint. |
+| `VT_TTS_VOICE` | `af_heart` | Teacher voice. |
+| `VT_PRON_BASE_URL` | `http://pron:8001` | Pronunciation scoring service. |
+| `VT_NOTES_DIR` | `/data/notes` | Where session notes are written (mount it into your Obsidian vault if you like). |
+
+The full reference, including the `pron` service and Docker-only variables, is in [docs/configuration.md](docs/configuration.md).
 
 ### Pick a hardware profile
 
@@ -67,24 +235,53 @@ Not sure? See [docs/hardware.md](docs/hardware.md).
 
 Browsers only allow the microphone on `localhost` or over **HTTPS**. To use voice-tutor from another device on your network, use `tailscale serve` (a bundled Caddy reverse proxy with a local certificate is planned for Phase 3). Step-by-step instructions are in [docs/hardware.md#remote-access](docs/hardware.md#remote-access).
 
-## Configuration
+## Commands
 
-All settings live in `.env` (validated at startup, so the app refuses to boot with a clear message if something is wrong).
+Run `just` to list everything. The main recipes:
 
-| Variable | Default | Description |
-|---|---|---|
-| `VT_PROFILE` | `cpu` | Hardware profile (see above). |
-| `VT_LLM_BASE_URL` | `http://llm:8080/v1` | Any OpenAI-compatible chat endpoint. |
-| `VT_LLM_MODEL` | `gemma-3-4b-it-q4` | Model name as the endpoint expects it (`gemma-3-12b-it-q4` on a 12–16 GB GPU). |
-| `VT_LLM_API_KEY` | *(empty)* | Only for cloud providers. |
-| `VT_STT_BASE_URL` | `http://stt:8000/v1` | Speech-to-text endpoint. |
-| `VT_STT_MODEL` | `large-v3-turbo` | Whisper variant. |
-| `VT_TTS_BASE_URL` | `http://tts:8880/v1` | Text-to-speech endpoint. |
-| `VT_TTS_VOICE` | `af_heart` | Teacher voice. |
-| `VT_PRON_BASE_URL` | `http://pron:8001` | Pronunciation scoring service. |
-| `VT_NOTES_DIR` | `/data/notes` | Where session notes are written (mount it into your Obsidian vault if you like). |
+| Recipe | Does |
+|---|---|
+| `just setup` | Install every dependency (uv, pnpm) and the git hooks |
+| `just fmt` | Format Python, TypeScript and Rust |
+| `just check` | ruff, mypy --strict, import-linter, ESLint, tsc, Prettier, cargo fmt, clippy |
+| `just test` | pytest (with coverage), Vitest, cargo test |
+| `just dev` | Models in Docker + api and UI locally |
+| `just dev-api` / `just dev-ui` | One half of `just dev` |
+| `just desktop` | Tauri dev window |
+| `just bundle` | Desktop installers for this OS |
+| `just up [profile]` / `just watch [profile]` / `just down` | Full stack in Docker / with Compose Watch / stop it |
+| `just eval` | Evaluations and README results table *(Phase 2)* |
 
-The full reference is in [docs/configuration.md](docs/configuration.md).
+CI (`.github/workflows/ci.yml`) runs the same `check` and `test` recipes on every push and pull request, compiles the desktop shell on Ubuntu **and Windows**, and builds both Docker images.
+
+## Project layout
+
+```
+.
+├── apps/desktop/         # React + TypeScript UI, wrapped by Tauri 2 (src-tauri/)
+├── packages/contracts/   # vt_contracts: Pydantic models shared by services and UI
+├── services/api/         # vt_api: FastAPI realtime session, teacher, notes, progress
+├── services/pron/        # vt_pron: pronunciation scoring
+├── docs/                 # architecture, development, configuration, hardware, evaluation, roadmap
+├── compose.yaml          # every service; hardware selected with --profile
+├── justfile              # task runner
+├── pyproject.toml        # uv workspace + ruff / mypy / pytest / import-linter config
+└── package.json          # pnpm workspace root
+```
+
+The full tree, with what each module will contain, is in [docs/architecture.md](docs/architecture.md#repository-layout).
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Port 1420 is already in use` when running `just desktop` | `just dev` or `just dev-ui` is already running Vite. Stop it; `just desktop` starts its own. |
+| The app says **API unreachable** | Start the backend: `just dev-api` (local) or `just up` (Docker). Check `curl http://localhost:8080/healthz`. |
+| Rust build fails with `webkit2gtk-4.1` / `javascriptcoregtk` not found | The Tauri system libraries are missing: see [Install the toolchain](#install-the-toolchain). |
+| `pnpm.ps1 cannot be loaded because running scripts is disabled` (Windows, outside `just`) | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. The `justfile` already bypasses it for its own recipes. |
+| `api` cannot write to `./data` | The container runs as uid 1000. If your user has another uid: `docker compose build --build-arg APP_UID=$(id -u) api`. |
+| `docker compose up --wait` takes a long time on first start | It is downloading models. Watch `docker compose logs -f llm-cpu` (or your profile's service). |
+| `uv: command not found` / `just: command not found` after installing | Open a new terminal, or add `~/.local/bin` (and `~/.cargo/bin` for Rust) to your `PATH`. |
 
 ## Results
 
@@ -105,22 +302,9 @@ What is measured:
 - Local models (12–14B) are good tutors but reason worse than frontier models. Plug in a cloud API if you need that.
 - This is a learning aid, not a certified assessment.
 
-## Development
+## Contributing
 
-Tasks run with [just](https://just.systems) (`uv tool install rust-just`), the same on Linux, macOS and Windows:
-
-```bash
-just setup      # uv sync + pnpm install + pre-commit hooks
-just check      # ruff + mypy --strict + import-linter + eslint + tsc + cargo clippy
-just test       # pytest + vitest + cargo test
-just dev        # api (reload) + UI in the browser; models via docker compose
-just desktop    # Tauri dev window against the local api
-just            # list every recipe
-```
-
-Monorepo: Python services in a [uv](https://docs.astral.sh/uv/) workspace (`services/api`, `services/pron`, shared `packages/contracts`), the UI and desktop shell in a pnpm workspace (`apps/desktop`).
-
-Conventions, tooling, testing strategy and typing rules: [docs/development.md](docs/development.md). Roadmap and progress: [docs/roadmap.md](docs/roadmap.md).
+Git flow: `master` holds releases, `develop` is the integration branch, and every change gets its own `feat/<name>` or `fix/<name>` branch from `develop`, merged back by pull request with CI green ([details](docs/development.md#branches-and-commits-git-flow)). Conventional Commits (`feat:`, `fix:`, `docs:`…), small PRs with tests, and `just check test` green before pushing; the pre-commit hooks installed by `just setup` catch most issues on commit. Architecture changes get a short ADR in [docs/architecture.md](docs/architecture.md#architecture-decisions-summary).
 
 ## Privacy
 
@@ -130,7 +314,7 @@ Conventions, tooling, testing strategy and typing rules: [docs/development.md](d
 
 ## Credits
 
-Built on [FastAPI](https://fastapi.tiangolo.com/), [Silero VAD](https://github.com/snakers4/silero-vad), [Speaches](https://github.com/speaches-ai/speaches), [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M), [llama.cpp](https://github.com/ggml-org/llama.cpp), [Ollama](https://ollama.com/) and wav2vec2 phoneme models. Check each model's license before redistributing it (see [docs/evaluation.md#licenses](docs/evaluation.md#licenses)).
+Built on [FastAPI](https://fastapi.tiangolo.com/), [Silero VAD](https://github.com/snakers4/silero-vad), [Speaches](https://github.com/speaches-ai/speaches), [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M), [llama.cpp](https://github.com/ggml-org/llama.cpp), [Ollama](https://ollama.com/), [Tauri](https://tauri.app/) and wav2vec2 phoneme models. Check each model's license before redistributing it (see [docs/evaluation.md#licenses](docs/evaluation.md#licenses)).
 
 ## License
 
