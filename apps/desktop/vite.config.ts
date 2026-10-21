@@ -23,5 +23,29 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     restoreMocks: true,
     unstubGlobals: true,
+    unstubEnvs: true,
+    coverage: {
+      provider: 'v8',
+      reportsDirectory: './coverage',
+      reporter: ['text', 'lcov', 'html'],
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        // Entrypoint: mounts <App /> into index.html; everything it renders is tested.
+        'src/main.tsx',
+        // Test apparatus and type-only declarations, not code under test.
+        'src/test/**',
+        'src/**/*.test.{ts,tsx}',
+        'src/**/*.d.ts',
+        // Generated from vt_contracts (`just types`), covered by the Python contract tests.
+        'src/generated/**',
+      ],
+      // A floor, not a target: never lower it to make a build pass (docs/development.md#testing).
+      thresholds: {
+        lines: 97,
+        functions: 97,
+        branches: 97,
+        statements: 97,
+      },
+    },
   },
 })

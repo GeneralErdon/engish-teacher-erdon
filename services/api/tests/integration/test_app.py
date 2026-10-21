@@ -3,6 +3,7 @@ from pathlib import Path
 
 import httpx2 as httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from vt_api import __version__
 from vt_api.config import Settings
@@ -52,3 +53,8 @@ async def test_serves_the_ui_without_shadowing_the_api(tmp_path: Path) -> None:
 
     assert page.text == "<h1>voice-tutor</h1>"
     assert health.status_code == 200
+
+
+def test_lifespan_starts_and_stops_cleanly() -> None:
+    with TestClient(create_app(Settings(_env_file=None))) as client:
+        assert client.get("/healthz").status_code == 200

@@ -88,9 +88,20 @@ branch = true
 source = ["vt_contracts", "vt_api", "vt_pron"]
 
 [tool.coverage.report]
+# A floor, not a target: never lower it to make a build pass (docs/development.md#testing).
+fail_under = 97
+precision = 2
 show_missing = true
 skip_covered = true
-exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@overload",
+    "if __name__ == .__main__.:",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"
 
 # ---------------------------------------------------------------- import-linter
 # Layering rules from docs/development.md. Run with `uv run lint-imports` (part of `just check`).
