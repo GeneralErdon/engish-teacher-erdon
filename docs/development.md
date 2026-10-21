@@ -15,7 +15,9 @@ Versions were verified on **2026-10-20** (Phase -1). Bump them on purpose, never
 | Tests | **pytest 9**, pytest-asyncio, pytest-cov, hypothesis (property tests), httpx2 (ASGI client) | Vitest + Testing Library (jsdom); `cargo test` |
 | Tensor typing | `jaxtyping` + `beartype`, added with torch in Phase 2 | — |
 | Tasks | [**just**](https://just.systems) (`justfile`): one entry point on Linux, macOS and **Windows** (make does not run natively there) | |
-| Hooks | pre-commit (ruff, mypy, import-linter, uv-lock, eslint, prettier, cargo fmt, large-file and private-key guards) | |
+| Hooks | **pre-commit** in three stages: format/lint/secrets on commit, commitlint on the message, types/architecture/tests on push ([.github/README.md](../.github/README.md#hooks-vs-ci)) | commitlint (Conventional Commits) |
+| Coverage | pytest-cov, **≥ 97 %** | Vitest v8 and cargo-llvm-cov, **≥ 97 %** |
+| CI/CD | GitHub Actions: `ci.yml`, `security.yml` (uv audit, pnpm audit, Trivy, dependency review), `codeql.yml`, `release.yml`; Codecov | |
 
 Notes on choices that are not the newest thing available:
 
@@ -58,7 +60,9 @@ Run `just` to list them. The Docker profile comes from `VT_PROFILE` in `.env` (d
 | `just setup` | `uv sync --all-packages`, `pnpm install`, `pre-commit install` |
 | `just fmt` | ruff (fix + format), prettier, cargo fmt |
 | `just check` | ruff, mypy --strict, import-linter, eslint, tsc, prettier --check, cargo fmt --check, clippy (`check-py`, `check-ui`, `check-rust` run each part) |
-| `just test` | pytest with coverage, vitest, cargo test (`test-py`, `test-ui`, `test-rust`) |
+| `just test` | pytest, Vitest and cargo test, each **failing under 97 % coverage** (`test-py`, `test-ui`, `test-rust`) |
+| `just test-fast` | The three suites without coverage (what the pre-push hook runs) |
+| `just security` | `uv audit` + `pnpm audit` + Trivy (CI policy in `trivy.yaml`): known vulnerabilities, secrets, Dockerfiles. Needs [Trivy](https://trivy.dev) installed |
 | `just types` | Regenerate `apps/desktop/src/generated` from `vt_contracts` *(Phase 1)* |
 | `just dev` | `pron` and the profile's model services in Docker; `api` (uvicorn --reload) and the UI (Vite, http://localhost:1420) locally |
 | `just dev-api` / `just dev-ui` | One half of `just dev` |
@@ -71,7 +75,7 @@ Run `just` to list them. The Docker profile comes from `VT_PROFILE` in `.env` (d
 
 `just dev` vs `just watch`: `dev` runs the api on your machine with instant reload and a debugger-friendly process; `watch` runs exactly the production images and rebuilds them on change (a few seconds, thanks to the uv and pnpm cache mounts).
 
-CI (`.github/workflows/ci.yml`) runs `just check-*` and `just test-*` per stack, Rust on Ubuntu **and Windows**, and builds both Docker images. From Phase 1 it also fails if `just types` or the README results block would change (generated files must be committed up to date).
+CI (`.github/workflows/ci.yml`) runs `just check-*` and `just test-*` per stack, Rust on Ubuntu **and Windows**, and builds both Docker images; `security.yml` and `codeql.yml` scan dependencies, secrets and code. What each job enforces, how it maps to the git hooks, and the branch protection: [.github/README.md](../.github/README.md). From Phase 1 CI also fails if `just types` or the README results block would change (generated files must be committed up to date).
 
 ### Desktop app notes
 
@@ -126,7 +130,13 @@ def phoneme_posteriors(audio: Float[Tensor, "samples"]) -> Float[Tensor, "frames
 | UI | Audio worklet framing, WS client, Markdown rendering is sanitised | Vitest + Testing Library |
 | Desktop | Permission handler logic, native audio framing | `cargo test`; manual smoke test of mic on Windows and Linux before each release |
 
-Coverage target: 85 % for `domain`, `teacher`, `vt_pron.scoring` and `vt_pron.alignment`. Do not chase coverage in adapters; contract tests matter more.
+### Coverage
+
+**Floor: 97 % of lines, branches and functions in every language** (Python, TypeScript, Rust), enforced by `just test` and CI. It is a floor, not a target: raise it as the suite grows and **never lower it to make a build pass**.
+
+- Coverage is a minimum, not the goal: adapters still need contract tests, and a line executed is not a line asserted.
+- Exclusions are few and justified next to their configuration: entrypoints (`src/main.tsx`, `main.rs`), code that needs a real window/webview (`src-tauri/src/shell.rs`; keep logic out of it, in tested modules), generated code and test helpers.
+- `if __name__ == "__main__":` and `if TYPE_CHECKING:` blocks are excluded in Python.
 
 ## Branches and commits (git flow)
 
