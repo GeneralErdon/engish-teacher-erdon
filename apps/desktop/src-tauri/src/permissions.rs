@@ -40,6 +40,13 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
 /// # Errors
 ///
 /// If the platform webview cannot be reached.
+#[cfg_attr(
+    not(target_os = "linux"),
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "only Linux has per-webview work to do"
+    )
+)]
 pub fn setup<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
     #[cfg(target_os = "linux")]
     for window in app.webview_windows().into_values() {

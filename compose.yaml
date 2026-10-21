@@ -19,7 +19,7 @@ x-model-healthcheck: &model-healthcheck
   timeout: 5s
   retries: 3
   # First start downloads models (GBs); failures during this window do not count.
-  start_period: 1h
+  start_period: 2h
   start_interval: 5s
 
 services:
@@ -36,15 +36,17 @@ services:
     extra_hosts:
       # `external` profile on Linux: reach Ollama / LM Studio running on the host.
       - "host.docker.internal:host-gateway"
+    # Model services only need to be started: the first start downloads GBs, and the api must
+    # come up meanwhile (Phase 1 reports each model's readiness in the UI).
     depends_on:
       pron: { condition: service_healthy }
-      stt-cpu: { condition: service_healthy, required: false }
-      stt-nvidia: { condition: service_healthy, required: false }
-      llm-cpu: { condition: service_healthy, required: false }
-      llm-nvidia: { condition: service_healthy, required: false }
-      llm-amd: { condition: service_healthy, required: false }
-      tts-cpu: { condition: service_healthy, required: false }
-      tts-nvidia: { condition: service_healthy, required: false }
+      stt-cpu: { condition: service_started, required: false }
+      stt-nvidia: { condition: service_started, required: false }
+      llm-cpu: { condition: service_started, required: false }
+      llm-nvidia: { condition: service_started, required: false }
+      llm-amd: { condition: service_started, required: false }
+      tts-cpu: { condition: service_started, required: false }
+      tts-nvidia: { condition: service_started, required: false }
     restart: unless-stopped
     develop:
       watch:

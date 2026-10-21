@@ -151,7 +151,7 @@ Or, with `just` installed: `just up` (it reads `VT_PROFILE` from `.env`, builds 
 
 Then open **http://localhost:8080**. Today it shows the backend status; voice arrives in Phase 1.
 
-The first start downloads several GB (images, then the chat model). Follow it with `docker compose logs -f`. Every port is published on `127.0.0.1` only:
+The first start downloads several GB (images, then the chat model). The `api` comes up right away; each model service turns `healthy` in `docker compose ps` once its model is ready. Follow the downloads with `docker compose logs -f`. Every port is published on `127.0.0.1` only:
 
 | Port | Service |
 |---|---|
@@ -281,6 +281,7 @@ The full tree, with what each module will contain, is in [docs/architecture.md](
 | `pnpm.ps1 cannot be loaded because running scripts is disabled` (Windows, outside `just`) | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. The `justfile` already bypasses it for its own recipes. |
 | `api` cannot write to `./data` | The container runs as uid 1000. If your user has another uid: `docker compose build --build-arg APP_UID=$(id -u) api`. |
 | `docker compose up --wait` takes a long time on first start | It is downloading models. Watch `docker compose logs -f llm-cpu` (or your profile's service). |
+| The chat model download stops progressing (`download failed: Failed to read connection`) | `docker compose restart llm-cpu` resumes it; what was already downloaded stays in the `voice-tutor_llm-models` volume. |
 | `uv: command not found` / `just: command not found` after installing | Open a new terminal, or add `~/.local/bin` (and `~/.cargo/bin` for Rust) to your `PATH`. |
 
 ## Results
