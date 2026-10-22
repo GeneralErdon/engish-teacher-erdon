@@ -35,11 +35,25 @@ class FakeSource {
   }
 }
 
+class FakeAnalyser {
+  fftSize = 2048
+  destination: unknown
+  /** What the analyser "hears" right now. */
+  signal = 0
+  connect(destination: unknown) {
+    this.destination = destination
+  }
+  getFloatTimeDomainData(samples: Float32Array) {
+    samples.fill(this.signal)
+  }
+}
+
 class FakeContext {
   static last: FakeContext
   state: AudioContextState = 'suspended'
   currentTime = 10
   destination = { speakers: true }
+  analyser = new FakeAnalyser()
   sources: FakeSource[] = []
   closed = false
   resume = vi.fn(() => {
@@ -51,6 +65,9 @@ class FakeContext {
   }
   createBuffer(_channels: number, length: number, sampleRate: number) {
     return new FakeBuffer(length, sampleRate)
+  }
+  createAnalyser() {
+    return this.analyser
   }
   createBufferSource() {
     const source = new FakeSource()
@@ -86,7 +103,8 @@ describe('createVoicePlayer', () => {
     expect(first?.buffer?.sampleRate).toBe(24_000)
     expect(first?.buffer?.data[0]).toBe(0.5)
     expect(second?.buffer?.data[0]).toBe(-1)
-    expect(first?.destination).toBe(context.destination)
+    expect(first?.destination).toBe(context.analyser)
+    expect(context.analyser.destination).toBe(context.destination)
     expect(first?.startedAt).toBeCloseTo(10.05)
     expect(second?.startedAt).toBeCloseTo(10.15)
     expect(changes).toEqual([true])
@@ -95,6 +113,20 @@ describe('createVoicePlayer', () => {
     expect(changes).toEqual([true])
     second?.onended?.()
     expect(changes).toEqual([true, false])
+  })
+
+  it('measures the level of what is playing', () => {
+    const { player } = setup()
+    expect(player.level()).toBe(0) // nothing created yet
+
+    player.play(pcm(2_400), 24_000)
+    const context = FakeContext.last
+    context.analyser.signal = 0.25
+
+    expect(context.analyser.fftSize).toBe(512)
+    expect(player.level()).toBeCloseTo(0.25)
+    context.sources[0]?.onended?.()
+    expect(player.level()).toBe(0) // silent again
   })
 
   it('starts again from now after a pause', () => {

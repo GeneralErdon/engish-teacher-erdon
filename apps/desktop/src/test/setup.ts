@@ -1,9 +1,12 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
 import { MotionGlobalConfig } from 'motion/react'
 import { afterEach } from 'vitest'
 
 import { installMatchMedia, resetMatchMedia } from './match-media'
+
+// `findBy*` waits up to 3 s (default 1 s): the whole suite under coverage can be slow on CI.
+configure({ asyncUtilTimeout: 3_000 })
 
 // Animations finish instantly: tests assert end states, not frames.
 MotionGlobalConfig.skipAnimations = true

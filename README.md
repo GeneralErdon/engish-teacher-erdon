@@ -47,10 +47,10 @@ Planned scope (see [Status](#voice-tutor) above):
 
 ```
 Desktop app (Tauri 2 + React) — or the same UI in a browser (home lab)
-   │  mic capture · playback · Markdown notes · progress
+   │  mic capture · voice activity detection (call mode) · playback · Markdown notes · progress
    │  WebSocket: binary PCM16 audio + typed JSON events
    ▼
-api (FastAPI) ── VAD · turn-taking · barge-in · teacher logic · notes · progress (SQLite)
+api (FastAPI) ── turns · streamed replies and voice · barge-in · teacher logic · notes · progress (SQLite)
    ├─► stt   speech-to-text   (Speaches / faster-whisper, or whisper.cpp)
    ├─► llm   chat model       (Ollama, llama.cpp server, LM Studio, or any OpenAI-compatible API)
    ├─► tts   text-to-speech   (Kokoro, served by the same Speaches)

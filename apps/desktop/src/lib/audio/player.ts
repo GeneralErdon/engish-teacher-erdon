@@ -1,3 +1,5 @@
+import { rms } from './source'
+
 /**
  * Plays the tutor's voice: chunks of PCM16 mono, scheduled back to back as they arrive, so
  * sentences synthesised one at a time sound like one reply.
@@ -9,6 +11,8 @@ export interface VoicePlayer {
   stop(): void
   /** Browsers start audio only after a user gesture: call this from one (a click, a key). */
   unlock(): void
+  /** Loudness of what is playing right now, 0..1 (for call mode's orb). */
+  level(): number
   close(): Promise<void>
 }
 
@@ -17,14 +21,22 @@ const LEAD_S = 0.05
 
 /** Web Audio playback; `onPlayingChange` reports when the voice starts and stops. */
 export function createVoicePlayer(onPlayingChange: (playing: boolean) => void): VoicePlayer {
-  let context: AudioContext | undefined
+  let output: { context: AudioContext; analyser: AnalyserNode } | undefined
+  let samples: Float32Array<ArrayBuffer> | undefined
   let queuedUntil = 0
   const sources = new Set<AudioBufferSourceNode>()
 
   const audio = () => {
-    context ??= new AudioContext()
-    if (context.state === 'suspended') void context.resume()
-    return context
+    if (!output) {
+      const context = new AudioContext()
+      // Everything plays through the analyser, which measures the level on its way out.
+      const analyser = context.createAnalyser()
+      analyser.fftSize = 512
+      analyser.connect(context.destination)
+      output = { context, analyser }
+    }
+    if (output.context.state === 'suspended') void output.context.resume()
+    return output
   }
 
   const stop = () => {
@@ -40,16 +52,16 @@ export function createVoicePlayer(onPlayingChange: (playing: boolean) => void): 
 
   return {
     play(pcm, sampleRate) {
-      const samples = new Int16Array(pcm, 0, pcm.byteLength >> 1)
-      if (samples.length === 0) return
-      const output = audio()
+      const pcm16 = new Int16Array(pcm, 0, pcm.byteLength >> 1)
+      if (pcm16.length === 0) return
+      const { context, analyser } = audio()
       // The context plays at the device rate and resamples the buffer itself.
-      const buffer = output.createBuffer(1, samples.length, sampleRate)
-      buffer.getChannelData(0).set(Float32Array.from(samples, (sample) => sample / 0x8000))
-      const source = output.createBufferSource()
+      const buffer = context.createBuffer(1, pcm16.length, sampleRate)
+      buffer.getChannelData(0).set(Float32Array.from(pcm16, (sample) => sample / 0x8000))
+      const source = context.createBufferSource()
       source.buffer = buffer
-      source.connect(output.destination)
-      const startAt = Math.max(queuedUntil, output.currentTime + LEAD_S)
+      source.connect(analyser)
+      const startAt = Math.max(queuedUntil, context.currentTime + LEAD_S)
       source.start(startAt)
       queuedUntil = startAt + buffer.duration
       source.onended = () => {
@@ -63,11 +75,17 @@ export function createVoicePlayer(onPlayingChange: (playing: boolean) => void): 
     unlock() {
       audio()
     },
+    level() {
+      if (!output || sources.size === 0) return 0
+      samples ??= new Float32Array(output.analyser.fftSize)
+      output.analyser.getFloatTimeDomainData(samples)
+      return rms(samples)
+    },
     async close() {
       stop()
-      const open = context
-      context = undefined
-      await open?.close()
+      const open = output
+      output = undefined
+      await open?.context.close()
     },
   }
 }

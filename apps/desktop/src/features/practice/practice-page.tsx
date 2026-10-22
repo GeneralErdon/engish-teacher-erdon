@@ -1,12 +1,13 @@
 import { Link } from '@tanstack/react-router'
-import { MessagesSquare, MicOff, RotateCw, Volume2, VolumeOff, WifiOff } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { MessagesSquare, MicOff, Phone, RotateCw, Volume2, VolumeOff, WifiOff } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useSpeechStatus } from '@/features/settings/use-speech'
 
+import { CallView } from './call-view'
 import { Composer } from './composer'
 import { TurnView } from './turn-view'
 import { useConversation } from './use-conversation'
@@ -21,10 +22,16 @@ const STARTERS = [
 
 export function PracticePage() {
   const [voiceReplies, setVoiceReplies] = useVoiceReplies()
+  const [inCall, setInCall] = useState(false)
   const speech = useSpeechStatus()
   const voiceReady = speech.data?.synthesis.model_ready
+  const callReady = speech.data
+    ? speech.data.recognition.model_ready && speech.data.synthesis.model_ready
+    : true
   // Until the status arrives, assume the voice works: if it does not, the server says so.
-  const conversation = useConversation({ speak: voiceReplies && voiceReady !== false })
+  const conversation = useConversation({
+    speak: (voiceReplies || inCall) && voiceReady !== false,
+  })
   const recorder = useRecorder(conversation.sendAudio)
   const end = useRef<HTMLDivElement>(null)
   const { turns, session, status } = conversation
@@ -43,6 +50,19 @@ export function PracticePage() {
     await recorder.start()
   }
 
+  const startCall = async () => {
+    // The click is the gesture browsers want before playing audio.
+    conversation.unlockAudio()
+    if (recorder.state !== 'idle') await recorder.stop()
+    setInCall(true)
+  }
+
+  const { interrupt, replying, speaking } = conversation
+  const endCall = useCallback(() => {
+    if (replying || speaking) interrupt()
+    setInCall(false)
+  }, [interrupt, replying, speaking])
+
   // Follow the conversation as it grows, including while a reply streams in.
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'end' })
@@ -60,7 +80,17 @@ export function PracticePage() {
             </Badge>
           </div>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            size="sm"
+            disabled={!session || status !== 'open' || !callReady}
+            title={
+              callReady ? 'Talk hands-free, like a phone call' : 'Set up voice in Settings first'
+            }
+            onClick={() => void startCall()}
+          >
+            <Phone /> Call
+          </Button>
           {voiceReady === false ? (
             <Button size="sm" variant="ghost" asChild>
               <Link to="/settings">
@@ -116,6 +146,11 @@ export function PracticePage() {
               .
             </p>
           </div>
+          {callReady && (
+            <Button size="lg" disabled={!session} onClick={() => void startCall()}>
+              <Phone /> Start a call
+            </Button>
+          )}
           <div className="flex flex-wrap justify-center gap-2">
             {STARTERS.map((starter) => (
               <Button
@@ -162,6 +197,8 @@ export function PracticePage() {
           onMic={() => void toggleMic()}
         />
       </div>
+
+      {inCall && <CallView conversation={conversation} onEnd={endCall} />}
     </div>
   )
 }

@@ -234,7 +234,7 @@ describe('Practice', () => {
 
 describe('conversation state', () => {
   it('ignores events for turns it does not know', () => {
-    const state = { status: 'open' as const, turns: [] }
+    const state = { status: 'open' as const, turns: [], transcribing: false }
 
     expect(
       reducer(state, { type: 'assistant.text.delta', v: 1, turn_id: 'tx', text: 'x' }),

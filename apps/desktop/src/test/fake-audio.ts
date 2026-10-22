@@ -2,6 +2,7 @@ import { act } from '@testing-library/react'
 
 import type { VoicePlayer } from '@/lib/audio/player'
 import type { AudioSource } from '@/lib/audio/source'
+import type { VoiceDetector, VoiceDetectorEvents } from '@/lib/audio/vad'
 
 /** A microphone for tests: `speak()` pushes frames to whoever is recording. */
 export class FakeMicrophone implements AudioSource {
@@ -50,6 +51,8 @@ export class FakePlayer implements VoicePlayer {
   unlocked = false
   stops = 0
   closed = false
+  /** What `level()` reports. */
+  loudness = 0
   private readonly onPlayingChange: (playing: boolean) => void
 
   constructor(onPlayingChange: (playing: boolean) => void) {
@@ -71,6 +74,10 @@ export class FakePlayer implements VoicePlayer {
     this.unlocked = true
   }
 
+  level() {
+    return this.loudness
+  }
+
   close() {
     this.closed = true
     return Promise.resolve()
@@ -85,5 +92,83 @@ export class FakePlayer implements VoicePlayer {
 
   static reset() {
     FakePlayer.current = undefined
+  }
+}
+
+/** Call mode's voice detector for tests: `say()` and friends play the detector's events. */
+export class FakeVoiceDetector implements VoiceDetector {
+  static current: FakeVoiceDetector | undefined
+  static failWith: Error | undefined
+  /** When set, `create()` waits for it (the model is still loading). */
+  static loading: Promise<void> | undefined
+
+  listening = false
+  strict = false
+  destroyed = false
+  private readonly events: VoiceDetectorEvents
+
+  constructor(events: VoiceDetectorEvents) {
+    this.events = events
+    FakeVoiceDetector.current = this
+  }
+
+  static async create(events: VoiceDetectorEvents): Promise<VoiceDetector> {
+    await FakeVoiceDetector.loading
+    if (FakeVoiceDetector.failWith) throw FakeVoiceDetector.failWith
+    return new FakeVoiceDetector(events)
+  }
+
+  start() {
+    this.listening = true
+    return Promise.resolve()
+  }
+
+  pause() {
+    this.listening = false
+    return Promise.resolve()
+  }
+
+  setStrict(strict: boolean) {
+    this.strict = strict
+  }
+
+  destroy() {
+    this.listening = false
+    this.destroyed = true
+    return Promise.resolve()
+  }
+
+  /** The learner says something: speech starts, is confirmed, and ends `frames` frames later. */
+  say(frames = 25) {
+    this.startSpeaking()
+    this.finishSpeaking(frames)
+  }
+
+  startSpeaking() {
+    act(() => {
+      this.events.onSpeechStart()
+      this.events.onLevel(0.2)
+      this.events.onSpeechConfirmed()
+    })
+  }
+
+  finishSpeaking(frames = 25) {
+    act(() => {
+      this.events.onSpeechEnd(Array.from({ length: frames }, () => new ArrayBuffer(640)))
+    })
+  }
+
+  /** A cough: speech starts, then turns out too short. */
+  cough() {
+    act(() => {
+      this.events.onSpeechStart()
+      this.events.onMisfire()
+    })
+  }
+
+  static reset() {
+    FakeVoiceDetector.current = undefined
+    FakeVoiceDetector.failWith = undefined
+    FakeVoiceDetector.loading = undefined
   }
 }

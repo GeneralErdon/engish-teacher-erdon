@@ -29,12 +29,24 @@ export interface ConversationState {
   turns: Turn[]
   /** The turn whose reply was last spoken aloud. */
   voiceTurn?: string
+  /** Spoken audio was sent and its transcript has not come back yet. */
+  transcribing: boolean
   error?: string | undefined
 }
 
-type Action = { type: 'status'; status: ConversationState['status'] } | ServerEvent
+type Action =
+  { type: 'status'; status: ConversationState['status'] } | { type: 'transcribing' } | ServerEvent
 
-const initial: ConversationState = { status: 'connecting', turns: [] }
+/** Errors that end a transcription without a turn. */
+const SPEECH_ERRORS = new Set<string>([
+  'stt_failed',
+  'no_speech',
+  'audio_too_short',
+  'audio_too_long',
+  'not_started',
+])
+
+const initial: ConversationState = { status: 'connecting', turns: [], transcribing: false }
 
 function updateTurn(state: ConversationState, id: string, change: (turn: Turn) => Turn) {
   return { ...state, turns: state.turns.map((turn) => (turn.id === id ? change(turn) : turn)) }
@@ -44,6 +56,8 @@ export function reducer(state: ConversationState, action: Action): ConversationS
   switch (action.type) {
     case 'status':
       return { ...state, status: action.status }
+    case 'transcribing':
+      return { ...state, transcribing: true }
     case 'session.ready':
       return { ...state, session: action, error: undefined }
     case 'transcript.final':
@@ -51,6 +65,7 @@ export function reducer(state: ConversationState, action: Action): ConversationS
         ...state,
         // A new turn made it through: earlier problems (a failed recording, say) are over.
         error: undefined,
+        transcribing: false,
         turns: [
           ...state.turns,
           {
@@ -95,7 +110,11 @@ export function reducer(state: ConversationState, action: Action): ConversationS
           error: action.message,
         }))
       }
-      return { ...state, error: action.message }
+      return {
+        ...state,
+        error: action.message,
+        transcribing: state.transcribing && !SPEECH_ERRORS.has(action.code),
+      }
     }
   }
 }
@@ -197,10 +216,13 @@ export function useConversation({
     [],
   )
 
-  /** Sending audio needs a user gesture first: call from a click or key handler. */
+  /** Playing audio needs a user gesture first: call from a click or key handler. */
   const unlockAudio = useCallback(() => {
-    if (speakRef.current) getPlayer().unlock()
+    getPlayer().unlock()
   }, [getPlayer])
+
+  /** Loudness of the tutor's voice right now, 0..1. */
+  const outputLevel = useCallback(() => player.current?.level() ?? 0, [])
 
   /** Microphone audio for the turn being recorded (binary frames). */
   const sendAudio = useCallback((pcm: ArrayBuffer) => {
@@ -216,7 +238,7 @@ export function useConversation({
     say: (text: string) => {
       // A new message interrupts the reply, on the server and in the speakers.
       silence()
-      unlockAudio()
+      if (speakRef.current) unlockAudio()
       send({ type: 'input.text', v: 1, text })
     },
     interrupt: () => {
@@ -224,11 +246,15 @@ export function useConversation({
       send({ type: 'input.interrupt', v: 1 })
     },
     unlockAudio,
+    outputLevel,
     sendAudio,
     /** The learner stopped speaking: transcribe and answer. */
     commit: () => {
+      dispatch({ type: 'transcribing' })
       send({ type: 'input.commit', v: 1 })
     },
     reconnect: nextAttempt,
   }
 }
+
+export type Conversation = ReturnType<typeof useConversation>

@@ -8,13 +8,17 @@ export interface AudioSource {
   stop(): Promise<void>
 }
 
-/** Loudness of a PCM16 frame, 0..1 (root mean square), for a level meter. */
-export function level(pcm: ArrayBuffer): number {
-  const samples = new Int16Array(pcm)
+/** Loudness of float samples (-1..1), 0..1 (root mean square), for a level meter. */
+export function rms(samples: Float32Array | Int16Array): number {
   if (samples.length === 0) return 0
   let sum = 0
   for (const sample of samples) sum += sample * sample
-  return Math.sqrt(sum / samples.length) / 0x8000
+  return Math.sqrt(sum / samples.length)
+}
+
+/** Loudness of a PCM16 frame, 0..1 (root mean square), for a level meter. */
+export function level(pcm: ArrayBuffer): number {
+  return rms(new Int16Array(pcm)) / 0x8000
 }
 
 /** A message the learner can act on, for errors from `getUserMedia` and friends. */

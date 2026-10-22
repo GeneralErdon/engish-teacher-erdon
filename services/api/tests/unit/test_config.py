@@ -36,7 +36,7 @@ def test_reads_vt_prefixed_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     [
         ("VT_LEARNER_LEVEL", "D1"),
         ("VT_PROFILE", "tpu"),
-        ("VT_VAD_THRESHOLD", "1.5"),
+        ("VT_TTS_SPEED", "3"),
         ("VT_LLM_BASE_URL", "not a url"),
         ("VT_LLM_PROVIDER", "mistral"),
         ("VT_UI_DIR", "/does/not/exist"),

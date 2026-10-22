@@ -18,8 +18,8 @@
 | Component | Owner | Responsibility | Interface |
 |---|---|---|---|
 | `desktop` | this repo | **Tauri 2** shell (Rust) around the React UI: native window, installers, mic permission handling, optional native audio capture | Hosts `ui` |
-| `ui` | this repo | React + TypeScript: mic capture (AudioWorklet), playback, conversation, Markdown notes viewer, progress. Runs inside `desktop` **and** in a plain browser (served by `api`) | WebSocket + REST to `api` |
-| `api` | this repo | Realtime session (VAD, turn-taking, barge-in), teacher logic, notes, progress, persistence | FastAPI: REST + `/ws/session` |
+| `ui` | this repo | React + TypeScript: mic capture (AudioWorklet), voice activity detection for call mode (Silero VAD on ONNX Runtime Web), playback, conversation, Markdown notes viewer, progress. Runs inside `desktop` **and** in a plain browser (served by `api`) | WebSocket + REST to `api` |
+| `api` | this repo | Realtime session (turns, streamed replies and voice, cancellation), teacher logic, notes, progress, persistence | FastAPI: REST + `/ws/session` |
 | `pron` | this repo | Pronunciation scoring: G2P → phoneme recognition → alignment → per-phoneme verdicts | REST `POST /v1/score` |
 | `stt` | third party | Speech-to-text (Speaches/faster-whisper or whisper.cpp) | OpenAI `/v1/audio/transcriptions` (or whisper.cpp `/inference` via adapter) |
 | `llm` | third party | Chat model: Ollama (local or cloud), llama.cpp server, LM Studio, OpenAI, Anthropic, Gemini, or any compatible server. Chosen in the UI (`/v1/llm/*`) or with `VT_LLM_*` | OpenAI `/v1/chat/completions` or Anthropic `/v1/messages` (streaming) |
@@ -100,7 +100,6 @@ voice-tutor/
 │   │   │   │   ├── protocol.py  # (de)serialisation of WS frames using vt_contracts
 │   │   │   │   ├── session.py   # per-connection conversation: turns, streamed replies, voice, corrections, barge-in
 │   │   │   │   ├── sentences.py # streamed reply → sentences for text-to-speech
-│   │   │   │   ├── vad.py       # Silero VAD (ONNX) wrapper
 │   │   │   │   ├── audio.py     # resampling, PCM16 ↔ float32, framing
 │   │   │   │   └── pipeline.py  # STT → teacher → TTS with cancellation
 │   │   │   ├── teacher/
@@ -155,8 +154,9 @@ voice-tutor/
 │       │   │   ├── audio/
 │       │   │   │   ├── source.ts          # AudioSource interface, level meter, mic error messages
 │       │   │   │   ├── web-audio-source.ts # getUserMedia + AudioWorklet (browser, WebView2, WebKitGTK)
+│       │   │   │   ├── vad.ts             # call mode: Silero VAD (vad-web), utterances as PCM16 frames
 │       │   │   │   ├── nativeSource.ts    # Tauri events from Rust capture (fallback)
-│       │   │   │   └── player.ts          # 24 kHz PCM playback queue, barge-in stop
+│       │   │   │   └── player.ts          # 24 kHz PCM playback queue, output level, barge-in stop
 │       │   │   └── platform.ts  # isTauri(), backend URL resolution
 │       │   └── generated/       # api.d.ts (from openapi.json) and routeTree.gen.ts (do not edit)
 │       ├── src-tauri/           # Rust: Tauri 2 app
@@ -186,7 +186,9 @@ One WebSocket per conversation. **Binary frames carry audio; text frames carry J
 
 **Origin check.** Browsers apply no CORS to WebSockets: any page could open this socket and spend the learner's API credits. The api accepts only `VT_CORS_ORIGINS`, the page it serves itself, and clients that send no `Origin` (not browsers); others are closed with code 1008.
 
-Implemented so far: `session.start` (with `speak`), `session.update`, `input.text`, binary audio + `input.commit` (push-to-talk), `input.interrupt`, `session.end` → `session.ready`, `transcript.final`, `assistant.text.delta`/`done`, `assistant.audio.started` + binary audio + `assistant.audio.done`, `correction`, `turn.metrics`, `error`. VAD and drills follow.
+Implemented so far: `session.start` (with `speak`), `session.update`, `input.text`, binary audio + `input.commit` (push-to-talk), `input.interrupt`, `session.end` → `session.ready`, `transcript.final`, `assistant.text.delta`/`done`, `assistant.audio.started` + binary audio + `assistant.audio.done`, `correction`, `turn.metrics`, `error`. Drills follow.
+
+**Call mode (hands-free).** Voice activity detection runs in the UI, not in the api: Silero VAD v5 on ONNX Runtime Web (`@ricky0123/vad-web`), loaded only when a call starts (the model, worklet and WebAssembly runtime are served from `/vad/` by the app itself, ~17 MB, no CDN). When the learner stops talking (900 ms of silence), the UI sends the utterance as PCM16 frames and `input.commit`, exactly like push-to-talk, so the protocol did not change. Barge-in happens where the audio plays: speech confirmed during the tutor's voice (400 ms over the threshold) stops the playback at once and sends `input.interrupt`. While the tutor speaks, the threshold goes up (0.5 → 0.8), so its own voice leaking from the speakers into the microphone does not count as the learner's; echo cancellation does the rest. The `vad.*` events below are therefore not used.
 
 **The tutor's voice.** With `speak`, the session cuts the streamed reply into sentences (`realtime/sentences.py`: terminal punctuation followed by whitespace, a few abbreviations kept whole, Markdown and emoji removed) and synthesises them one at a time, in order, while the model keeps writing. Audio frames go out as Speaches produces them, bracketed by `assistant.audio.started` and `assistant.audio.done`; the UI schedules them back to back in one `AudioContext` (`lib/audio/player.ts`). An interruption cancels the reply task, which cancels the voice task with it, and the UI drops any frames of that turn still in flight. If the voice fails, the reply goes on as text with a `tts_failed` error.
 
@@ -228,11 +230,11 @@ Implemented so far: `session.start` (with `speak`), `session.update`, `input.tex
 ### Turn lifecycle
 
 ```
-user speaks ──► VAD start ──► frames buffered ──► VAD stop (or input.commit)
+user speaks ──► (call mode: VAD in the UI) ──► frames ──► input.commit (VAD end, or push-to-talk)
      ──► STT ──► transcript.final
      ──► teacher (LLM, streamed) ──► sentence splitter ──► TTS per sentence ──► audio frames
      └── in parallel (drill mode): pron.score(audio, target) ──► pron.result
-barge-in: VAD start during playback ──► cancel LLM + TTS tasks ──► new user turn
+barge-in: speech during playback ──► UI stops the audio + input.interrupt ──► cancel LLM + TTS tasks ──► new user turn
 ```
 
 Text is sent to TTS **sentence by sentence** as the LLM streams, so audio starts before the full reply is generated.
@@ -285,3 +287,4 @@ The same code ships in two forms. Only *who starts the processes* changes: the a
 | 7 | `just` as the task runner | Runs natively on Windows (PowerShell) as well as Linux/macOS; installs without admin rights (`uv tool install rust-just`) | Make (no native Windows), npm scripts (Node-only) |
 | 8 | Two distributions of one codebase: Docker Compose (server) and, from Phase 4, a desktop installer that runs the backend as Tauri sidecars ([Distribution](#distribution)) | One-click install for learners; Docker keeps hardware profiles and the home-lab case; Vulkan builds cover every GPU vendor without per-vendor images; native Metal on macOS | Desktop-only bundle (loses the home-lab case), Docker-only (too hard for learners), the app driving `docker compose` (still needs Docker) |
 | 9 | UI: TanStack Router (file routes, code split per page) + TanStack Query over a client generated from the api's OpenAPI schema (`openapi-fetch` + `openapi-react-query`); react-hook-form + zod; shadcn/ui (Radix) + Tailwind 4; `motion` loaded lazily (`LazyMotion`) | One source of truth for API types, from the Pydantic models to the hooks; accessible primitives without a component library to fight; animations that cost nothing until first paint and respect reduced motion | Hand-written fetch types, Redux, MUI/Chakra, CSS-in-JS |
+| 10 | Voice activity detection in the UI (Silero VAD on ONNX Runtime Web), not in the api | Barge-in where the audio plays, with no network round trip; the UI knows when the tutor is audible and makes detection stricter then; the protocol stays push-to-talk's (frames + `input.commit`), so the api needs no model and only receives speech | Silero in the api (continuous upstream audio, barge-in one round trip later, a model to download on the server) |
