@@ -42,7 +42,7 @@ describe('Practice', () => {
   it('connects to the session socket and starts a conversation', async () => {
     const { socket } = await openPractice()
 
-    expect(socket.url).toBe('ws://localhost:8080/ws/session')
+    expect(socket.url).toBe(`${window.location.origin.replace('http', 'ws')}/ws/session`)
     expect(socket.sent).toEqual([{ type: 'session.start', v: 1, topic: null, speak: true }])
     expect(screen.getByText('Level B1')).toBeInTheDocument()
     expect(screen.getByText('Ollama Cloud · gpt-oss:120b')).toBeInTheDocument()

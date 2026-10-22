@@ -3,11 +3,17 @@ import { fileURLToPath } from 'node:url'
 
 import tailwindcss from '@tailwindcss/vite'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
+import basicSsl from '@vitejs/plugin-basic-ssl'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
 // Set by `tauri dev` when the app runs on a device (mobile / remote debugging); unset on desktop.
 const host = process.env.TAURI_DEV_HOST
+// The api the dev server forwards to (`just dev-api`).
+const api = process.env.VT_API_URL ?? 'http://localhost:8080'
+// `just dev-lan`: HTTPS with a self-signed certificate, because phones only open the microphone
+// on secure pages (`http://localhost` counts as secure; `http://192.168.x.x` does not).
+const https = process.env.VT_DEV_HTTPS === '1'
 
 // https://v2.tauri.app/start/frontend/vite/
 export default defineConfig({
@@ -21,6 +27,7 @@ export default defineConfig({
       generatedRouteTree: './src/generated/routeTree.gen.ts',
     }),
     react(),
+    ...(https ? [basicSsl({ name: 'voice-tutor' })] : []),
   ],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
@@ -34,6 +41,14 @@ export default defineConfig({
     host: host ?? false,
     ...(host ? { hmr: { protocol: 'ws', host, port: 1421 } } : {}),
     watch: { ignored: ['**/src-tauri/**'] },
+    // The page talks to the api through this server, on its own origin: no CORS, and a phone on
+    // the LAN reaches the api while the api itself listens on localhost only. The Host header is
+    // kept, so the api's WebSocket origin check sees a same-origin page.
+    proxy: {
+      '/v1': api,
+      '/healthz': api,
+      '/ws': { target: api, ws: true },
+    },
   },
   test: {
     environment: 'jsdom',

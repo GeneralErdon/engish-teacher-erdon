@@ -140,6 +140,12 @@ dev-api:
 dev-ui:
     pnpm --filter {{ desktop }} dev
 
+# UI for a phone on the same Wi-Fi: https://<this computer's IP>:1420 (self-signed, so the mic works). With `just dev-api`
+[env("VT_DEV_HTTPS", "1")]
+[group('dev')]
+dev-lan:
+    pnpm --filter {{ desktop }} dev --host
+
 # Tauri dev window (starts its own Vite). Backend: `just models` + `just dev-api`, or `just up`
 [group('dev')]
 desktop:
