@@ -186,9 +186,9 @@ Then pick how much of the stack you need:
 | You want to | Run | Open |
 |---|---|---|
 | Work on the UI or the api, or chat by text with a cloud model | `just dev-api` and, in a second terminal, `just dev-ui` | http://localhost:1420 |
-| Also talk: speak, and hear the tutor (local speech recognition and voice) | the above, plus Speaches once: [voice setup](docs/configuration.md#voice-setup) | http://localhost:1420 |
+| Also talk: speak, and hear the tutor (local speech recognition and voice) | `just voice` once ([voice setup](docs/configuration.md#voice-setup)), then the above | http://localhost:1420 |
 | The full loop: models in Docker, api and UI local | `just dev` | http://localhost:1420 |
-| Try it on your phone (same Wi-Fi) | `just dev-api` and, in a second terminal, `just dev-lan` | https://&lt;your computer's IP&gt;:1420 (accept the self-signed certificate once) |
+| Try it on your phone (same Wi-Fi), with a cloud chat model | `just dev-phone` (= `voice`, then `dev-api` + `dev-lan`) | https://&lt;your computer's IP&gt;:1420 (accept the self-signed certificate once) |
 | The desktop window | `just dev-api` (or `just models` + `just dev-api`), then `just desktop` | native window |
 | Production images with rebuild on change | `just watch` | http://localhost:8080 |
 

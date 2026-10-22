@@ -35,7 +35,7 @@ describe('Voice settings', () => {
     expect(section().queryByText('One-time setup')).not.toBeInTheDocument()
   })
 
-  it('gives every setup command when Speaches is not running', async () => {
+  it('gives one command when Speaches is not running: it also downloads the models', async () => {
     const api = fakeApi()
     notReady(api, 'recognition', false)
     notReady(api, 'synthesis', false)
@@ -43,10 +43,9 @@ describe('Voice settings', () => {
 
     expect(await screen.findByText('One-time setup')).toBeInTheDocument()
     expect(section().getAllByText('Could not connect to http://localhost:8000/v1.')).toHaveLength(2)
-    expect(section().getByText('docker compose --profile cpu up -d stt-cpu')).toBeInTheDocument()
-    expect(section().getByText(/Then download the models once/)).toBeInTheDocument()
-    expect(section().getByText(download(STT))).toBeInTheDocument()
-    expect(section().getByText(download(TTS))).toBeInTheDocument()
+    expect(section().getByText('just voice')).toBeInTheDocument()
+    expect(section().getByText(/first start downloads the models/)).toBeInTheDocument()
+    expect(section().queryByText(/speaches-cli/)).not.toBeInTheDocument()
   })
 
   it('only asks for the missing model when the server runs, and checks again', async () => {
@@ -55,10 +54,10 @@ describe('Voice settings', () => {
     const { user } = renderApp('/settings', api)
 
     expect(await screen.findByText('Not ready.')).toBeInTheDocument()
-    expect(section().getByText(/^Download the model once/)).toBeInTheDocument()
+    expect(section().getByText(/downloads what is missing/)).toBeInTheDocument()
+    expect(section().getByText('just voice')).toBeInTheDocument()
     expect(section().getByText(download(TTS))).toBeInTheDocument()
     expect(section().queryByText(download(STT))).not.toBeInTheDocument()
-    expect(section().queryByText(/docker compose/)).not.toBeInTheDocument()
 
     api.speech = fakeApi().speech
     await user.click(section().getByRole('button', { name: /check again/i }))

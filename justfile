@@ -12,6 +12,9 @@ PROFILE := env("VT_PROFILE", "cpu")
 # Where `just dev` finds the chat model from the host. `external` reuses your own server URL.
 LLM_DEV_URL := if PROFILE == "external" { replace(env("VT_LLM_BASE_URL", "http://localhost:11434/v1"), "host.docker.internal", "localhost") } else { "http://localhost:8081/v1" }
 
+# Speaches service for the profile: speech recognition and the tutor's voice.
+SPEECH := if PROFILE == "nvidia" { "stt-nvidia" } else { "stt-cpu" }
+
 desktop := "@voice-tutor/desktop"
 tauri_manifest := "apps/desktop/src-tauri/Cargo.toml"
 
@@ -133,6 +136,20 @@ models:
 [group('dev')]
 dev-api:
     uv run uvicorn --factory vt_api.main:create_app --reload --reload-dir services/api/src --reload-dir packages/contracts/src --port 8080
+
+# Speech on this machine: Speaches on :8000, waits until its models are downloaded (~700 MB the first time)
+[group('dev')]
+voice:
+    @echo "Starting Speaches. The first start downloads the speech models: docker compose logs -f {{ SPEECH }}"
+    docker compose --profile {{ PROFILE }} up -d --wait {{ SPEECH }}
+
+# Try it on your phone with a cloud chat model: `voice`, then the api and the HTTPS UI (`dev-lan`) together
+[group('dev')]
+dev-phone: voice _serve-lan
+
+[parallel]
+[private]
+_serve-lan: dev-api dev-lan
 
 # UI on http://localhost:1420 (Vite, hot reload)
 [group('dev')]

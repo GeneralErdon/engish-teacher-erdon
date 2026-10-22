@@ -51,21 +51,22 @@ export function SpeechSection() {
           <TriangleAlert className="text-warning" />
           <AlertTitle>One-time setup</AlertTitle>
           <AlertDescription className="flex w-full flex-col gap-2">
-            {stopped && (
+            <span>
+              {stopped
+                ? 'Start Speaches, which runs both on your machine. The first start downloads the models (~700 MB) and waits until they are ready:'
+                : 'Run this again: it downloads what is missing.'}
+            </span>
+            <Command>just voice</Command>
+            {!stopped && (
               <>
-                <span>Start Speaches, which runs both on your CPU:</span>
-                <Command>docker compose --profile cpu up -d stt-cpu</Command>
+                <span>Or, on a Speaches you started yourself:</span>
+                {missing.map((status) => (
+                  <Command key={status.model}>
+                    {`SPEACHES_BASE_URL=http://localhost:8000 uvx speaches-cli model download ${status.model}`}
+                  </Command>
+                ))}
               </>
             )}
-            <span>
-              {stopped ? 'Then download' : 'Download'}{' '}
-              {missing.length > 1 ? 'the models' : 'the model'} once:
-            </span>
-            {missing.map((status) => (
-              <Command key={status.model}>
-                {`SPEACHES_BASE_URL=http://localhost:8000 uvx speaches-cli model download ${status.model}`}
-              </Command>
-            ))}
           </AlertDescription>
         </Alert>
       )}
