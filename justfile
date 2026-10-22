@@ -103,10 +103,11 @@ security:
     pnpm audit --audit-level high
     trivy fs --config trivy.yaml .
 
-# Regenerate apps/desktop/src/generated from vt_contracts
+# Regenerate the UI's API types: api OpenAPI schema -> apps/desktop/src/generated/api.d.ts
 [group('quality')]
 types:
-    @echo "not implemented yet: arrives with vt_contracts.ws in Phase 1 (docs/roadmap.md)"
+    uv run vt-api-openapi apps/desktop/openapi.json
+    pnpm --filter {{ desktop }} types
 
 # Model services in Docker; api (auto-reload) and UI (Vite) locally, in the browser
 [group('dev')]

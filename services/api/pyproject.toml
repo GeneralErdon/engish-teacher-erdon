@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 vt-api = "vt_api.__main__:main"
+vt-api-openapi = "vt_api.openapi:main"
 
 [tool.uv.sources]
 vt-contracts = { workspace = true }
