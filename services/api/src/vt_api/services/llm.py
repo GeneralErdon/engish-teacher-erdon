@@ -8,12 +8,13 @@ from vt_api.domain.llm import (
     PROVIDERS,
     ChatMessage,
     LlmConfig,
+    ProviderConfig,
     ProviderError,
     resolve_connection,
     to_view,
     with_provider,
 )
-from vt_api.ports.llm import ChatModelFactory, LlmConfigRepository
+from vt_api.ports.llm import ChatModel, ChatModelFactory, LlmConfigRepository
 from vt_contracts.llm import (
     ConnectionTestRequest,
     ConnectionTestResult,
@@ -48,6 +49,11 @@ class LlmService:
     async def config(self) -> LlmConfig:
         """Saved settings if there are any, else the environment's."""
         return await self._repository.load() or self._environment
+
+    async def active_chat(self) -> tuple[ChatModel, ProviderConfig]:
+        """The model the tutor talks with, and its settings."""
+        provider = (await self.config()).active_provider
+        return self._chat_models(provider), provider
 
     async def view(self) -> LlmSettingsView:
         return to_view(await self.config())

@@ -1,5 +1,14 @@
 import { Link } from '@tanstack/react-router'
-import { ArrowRight, Bot, Check, Mic, RotateCw, Server, ShieldCheck } from 'lucide-react'
+import {
+  ArrowRight,
+  Bot,
+  Check,
+  MessagesSquare,
+  Mic,
+  RotateCw,
+  Server,
+  ShieldCheck,
+} from 'lucide-react'
 import { m, type Variants } from 'motion/react'
 import type { ReactNode } from 'react'
 
@@ -46,11 +55,10 @@ export function HomePage() {
               pronunciation feedback, at your own pace.
             </p>
             <div className="flex flex-wrap items-center gap-3">
-              <Button size="lg" disabled>
-                <Mic aria-hidden="true" /> Start a conversation
-                <Badge variant="outline" className="ml-1 border-current/30 text-current">
-                  Soon
-                </Badge>
+              <Button size="lg" asChild>
+                <Link to="/practice">
+                  <MessagesSquare aria-hidden="true" /> Start a conversation
+                </Link>
               </Button>
               <Button size="lg" variant="outline" asChild>
                 <Link to="/settings">
@@ -130,7 +138,7 @@ export function HomePage() {
         </StatusCard>
 
         <StatusCard icon={<Mic />} title="Voice" badge={<Badge variant="outline">Soon</Badge>}>
-          <p>Speech recognition and the tutor&apos;s voice arrive with the conversation screen.</p>
+          <p>Talking instead of typing is next: speech recognition runs on your machine.</p>
         </StatusCard>
       </m.section>
 
@@ -146,7 +154,11 @@ export function HomePage() {
             Ollama, Ollama Cloud, OpenAI, Anthropic, Gemini or any compatible server.
           </Step>
           <Step n={3} done={false} title="Have your first conversation">
-            Coming with the next release.
+            Write to your tutor in{' '}
+            <Link to="/practice" className="text-primary underline-offset-4 hover:underline">
+              Practice
+            </Link>
+            ; voice is coming next.
           </Step>
         </ol>
       </m.section>

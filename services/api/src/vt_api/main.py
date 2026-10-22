@@ -10,7 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from vt_api import __version__
 from vt_api.config import Settings
 from vt_api.container import Container, build_container
-from vt_api.http import health, learner, llm
+from vt_api.http import health, learner, llm, ws
+from vt_api.http.schema import openapi_with_events
 
 
 def create_app(settings: Settings | None = None, container: Container | None = None) -> FastAPI:
@@ -25,6 +26,7 @@ def create_app(settings: Settings | None = None, container: Container | None = N
             yield
 
     app = FastAPI(title="voice-tutor api", version=__version__, lifespan=lifespan)
+    app.state.allowed_origins = frozenset(settings.cors_origins)
     if container is not None:
         app.state.container = container
     app.add_middleware(
@@ -36,6 +38,9 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     app.include_router(health.router)
     app.include_router(llm.router)
     app.include_router(learner.router)
+    app.include_router(ws.router)
+
+    app.openapi = lambda: openapi_with_events(app)  # type: ignore[method-assign]
 
     # Browser / home-lab mode: the same UI the desktop app bundles. Mounted last so API routes win.
     if settings.ui_dir is not None:

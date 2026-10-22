@@ -19,8 +19,9 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 - [x] Chat model providers chosen from the UI: Ollama (local and cloud), OpenAI, Anthropic, Gemini, and any OpenAI- or Anthropic-compatible endpoint. API keys stay in the api and never come back to the UI (2026-10-21)
 - [x] UI shell: responsive navigation, Home (welcome + status), Settings, light/dark theme, typed API client generated from the api's OpenAPI schema (2026-10-21)
 - [ ] Desktop: configurable backend URL (for a home-lab server) and a "backend unavailable" screen with the next step to take
-- [ ] Realtime session: VAD, turn-taking, sentence-streamed TTS, barge-in cancellation
-- [ ] Teacher: level-aware conversation + structured corrections
+- [x] Text conversation over `/ws/session`: streamed replies, Tandem-style corrections in the learner's chosen language, interruptions, per-turn latency (2026-10-22)
+- [ ] Realtime voice session: push-to-talk recording, local STT (Speaches), VAD, sentence-streamed TTS, barge-in
+- [x] Teacher: level-aware conversation + structured corrections (2026-10-22)
 - [ ] UI (desktop + browser): talk screen, live transcript, corrections panel
 - [ ] Session note (Markdown) + notes viewer
 - [ ] `compose.yaml` with `cpu`, `amd`, `external` profiles; README quick start verified on a clean machine

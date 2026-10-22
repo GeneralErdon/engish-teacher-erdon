@@ -133,8 +133,50 @@ export interface components {
     schemas: {
         /** @enum {string} */
         ApiKeyPolicy: "required" | "optional";
+        /** AssistantTextDelta */
+        AssistantTextDelta: {
+            /** Text */
+            text: string;
+            /** Turn Id */
+            turn_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "assistant.text.delta";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
+        };
+        /** AssistantTextDone */
+        AssistantTextDone: {
+            /**
+             * Interrupted
+             * @default false
+             */
+            interrupted: boolean;
+            /** Text */
+            text: string;
+            /** Turn Id */
+            turn_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "assistant.text.done";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
+        };
         /** @enum {string} */
         CefrLevel: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
+        ClientEvent: components["schemas"]["SessionStart"] | components["schemas"]["InputText"] | components["schemas"]["InputInterrupt"] | components["schemas"]["SessionEnd"];
         /**
          * ConnectionTestRequest
          * @description Body of `POST /v1/llm/test`.
@@ -165,6 +207,64 @@ export interface components {
             /** Reply */
             reply?: string | null;
         };
+        /**
+         * Correction
+         * @description Feedback on the learner's message. `corrected == text` and no items: nothing to fix.
+         */
+        Correction: {
+            /** Corrected */
+            corrected: string;
+            /** Items */
+            items: components["schemas"]["CorrectionItem"][];
+            /** Latency Ms */
+            latency_ms: number;
+            /** Turn Id */
+            turn_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "correction";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
+        };
+        /** CorrectionItem */
+        CorrectionItem: {
+            /** Explanation */
+            explanation: string;
+            kind: components["schemas"]["CorrectionKind"];
+            /** Original */
+            original: string;
+            /** Suggestion */
+            suggestion: string;
+        };
+        /** @enum {string} */
+        CorrectionKind: "grammar" | "vocabulary" | "spelling" | "naturalness";
+        /** @enum {string} */
+        ErrorCode: "bad_event" | "not_started" | "llm_failed" | "internal";
+        /** ErrorEvent */
+        ErrorEvent: {
+            code: components["schemas"]["ErrorCode"];
+            /** Message */
+            message: string;
+            /** Retryable */
+            retryable: boolean;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "error";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
+        };
         /** @enum {string} */
         ExplanationLanguage: "english" | "native";
         /** HTTPValidationError */
@@ -189,6 +289,42 @@ export interface components {
             status: "ok";
             /** Version */
             version: string;
+        };
+        /**
+         * InputInterrupt
+         * @description Stop the tutor's current reply (the learner started a new turn or pressed stop).
+         */
+        InputInterrupt: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "input.interrupt";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
+        };
+        /**
+         * InputText
+         * @description A typed message from the learner.
+         */
+        InputText: {
+            /** Text */
+            text: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "input.text";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
         };
         /**
          * LearnerProfile
@@ -312,6 +448,111 @@ export interface components {
             kind: components["schemas"]["ProviderKind"];
             /** Model */
             model: string;
+        };
+        ServerEvent: components["schemas"]["SessionReady"] | components["schemas"]["TranscriptFinal"] | components["schemas"]["AssistantTextDelta"] | components["schemas"]["AssistantTextDone"] | components["schemas"]["Correction"] | components["schemas"]["TurnMetrics"] | components["schemas"]["ErrorEvent"];
+        /** SessionEnd */
+        SessionEnd: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "session.end";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
+        };
+        /** SessionReady */
+        SessionReady: {
+            level: components["schemas"]["CefrLevel"];
+            /** Model */
+            model: string;
+            /** Provider */
+            provider: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "session.ready";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
+        };
+        /**
+         * SessionStart
+         * @description Begin a conversation. Level and explanation language come from the learner profile.
+         */
+        SessionStart: {
+            /**
+             * Topic
+             * @default null
+             */
+            topic: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "session.start";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
+        };
+        /**
+         * TranscriptFinal
+         * @description What the learner said (or typed) in this turn, as the server will use it.
+         */
+        TranscriptFinal: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "text" | "voice";
+            /** Text */
+            text: string;
+            /** Turn Id */
+            turn_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "transcript.final";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
+        };
+        /**
+         * TurnMetrics
+         * @description Latency of the tutor's reply, in milliseconds, from the learner's message (Phase 0).
+         */
+        TurnMetrics: {
+            /** First Token Ms */
+            first_token_ms: number | null;
+            /** Reply Ms */
+            reply_ms: number;
+            /** Turn Id */
+            turn_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "turn.metrics";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
         };
         /** ValidationError */
         ValidationError: {
