@@ -8,6 +8,7 @@ from vt_contracts.ws import (
     CorrectionItem,
     InputText,
     SessionStart,
+    SessionUpdate,
 )
 
 
@@ -18,7 +19,18 @@ def test_client_events_are_told_apart_by_type() -> None:
 
 
 def test_version_and_type_default_on_the_way_out() -> None:
-    assert SessionStart().model_dump() == {"v": 1, "type": "session.start", "topic": None}
+    assert SessionStart().model_dump() == {
+        "v": 1,
+        "type": "session.start",
+        "topic": None,
+        "speak": False,
+    }
+
+
+def test_the_voice_can_be_switched_during_a_session() -> None:
+    event = CLIENT_EVENT.validate_json('{"type": "session.update", "v": 1, "speak": true}')
+
+    assert event == SessionUpdate(speak=True)
 
 
 @pytest.mark.parametrize(

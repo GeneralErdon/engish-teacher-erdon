@@ -14,6 +14,7 @@ from pydantic import SecretStr
 from vt_api.adapters.chat_factory import SdkChatModelFactory
 from vt_api.adapters.json_llm_config import JsonLlmConfigRepository
 from vt_api.adapters.openai_stt import OpenAISpeechToText
+from vt_api.adapters.openai_tts import OpenAITextToSpeech
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.domain.llm import environment_config
@@ -76,7 +77,8 @@ def container(
             environment=environment,
         ),
         learner=learner_service,
-        speech=create_autospec(OpenAISpeechToText, instance=True),
+        stt=create_autospec(OpenAISpeechToText, instance=True),
+        tts=create_autospec(OpenAITextToSpeech, instance=True),
     )
 
 

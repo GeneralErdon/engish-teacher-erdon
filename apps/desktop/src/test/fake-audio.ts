@@ -1,5 +1,6 @@
 import { act } from '@testing-library/react'
 
+import type { VoicePlayer } from '@/lib/audio/player'
 import type { AudioSource } from '@/lib/audio/source'
 
 /** A microphone for tests: `speak()` pushes frames to whoever is recording. */
@@ -38,5 +39,51 @@ export class FakeMicrophone implements AudioSource {
   static reset() {
     FakeMicrophone.current = undefined
     FakeMicrophone.failWith = undefined
+  }
+}
+
+/** Speakers for tests: records what would play; `finish()` ends the playback. */
+export class FakePlayer implements VoicePlayer {
+  static current: FakePlayer | undefined
+
+  readonly played: { pcm: ArrayBuffer; sampleRate: number }[] = []
+  unlocked = false
+  stops = 0
+  closed = false
+  private readonly onPlayingChange: (playing: boolean) => void
+
+  constructor(onPlayingChange: (playing: boolean) => void) {
+    this.onPlayingChange = onPlayingChange
+    FakePlayer.current = this
+  }
+
+  play(pcm: ArrayBuffer, sampleRate: number) {
+    this.played.push({ pcm, sampleRate })
+    this.onPlayingChange(true)
+  }
+
+  stop() {
+    this.stops++
+    this.onPlayingChange(false)
+  }
+
+  unlock() {
+    this.unlocked = true
+  }
+
+  close() {
+    this.closed = true
+    return Promise.resolve()
+  }
+
+  /** Everything queued has been played. */
+  finish() {
+    act(() => {
+      this.onPlayingChange(false)
+    })
+  }
+
+  static reset() {
+    FakePlayer.current = undefined
   }
 }

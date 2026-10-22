@@ -23,7 +23,7 @@
 | `pron` | this repo | Pronunciation scoring: G2P → phoneme recognition → alignment → per-phoneme verdicts | REST `POST /v1/score` |
 | `stt` | third party | Speech-to-text (Speaches/faster-whisper or whisper.cpp) | OpenAI `/v1/audio/transcriptions` (or whisper.cpp `/inference` via adapter) |
 | `llm` | third party | Chat model: Ollama (local or cloud), llama.cpp server, LM Studio, OpenAI, Anthropic, Gemini, or any compatible server. Chosen in the UI (`/v1/llm/*`) or with `VT_LLM_*` | OpenAI `/v1/chat/completions` or Anthropic `/v1/messages` (streaming) |
-| `tts` | third party | Text-to-speech (Kokoro-FastAPI) | OpenAI `/v1/audio/speech` (streaming PCM) |
+| `tts` | third party | Text-to-speech: Kokoro on ONNX Runtime, served by the same Speaches as `stt` (Kokoro-FastAPI also works) | OpenAI `/v1/audio/speech` (streaming PCM, 24 kHz) |
 
 Only `api`, `pron`, `ui` and `desktop` contain our code. Everything else is replaceable infrastructure.
 
@@ -83,6 +83,7 @@ voice-tutor/
 │   │   │   │                    #            PronunciationScorer, NotesRepository, ProgressRepository
 │   │   │   ├── services/        # use cases over the ports, called by http/ (llm.py: provider settings)
 │   │   │   ├── adapters/
+│   │   │   │   ├── openai_models.py # is a speech server up, with our model downloaded?
 │   │   │   │   ├── openai_stt.py
 │   │   │   │   ├── whispercpp_stt.py
 │   │   │   │   ├── openai_chat.py   # Chat Completions: OpenAI, Gemini, Ollama, llama.cpp, LM Studio...
@@ -95,7 +96,8 @@ voice-tutor/
 │   │   │   │   └── markdown_notes.py
 │   │   │   ├── realtime/
 │   │   │   │   ├── protocol.py  # (de)serialisation of WS frames using vt_contracts
-│   │   │   │   ├── session.py   # per-connection conversation: turns, streamed replies, corrections, barge-in
+│   │   │   │   ├── session.py   # per-connection conversation: turns, streamed replies, voice, corrections, barge-in
+│   │   │   │   ├── sentences.py # streamed reply → sentences for text-to-speech
 │   │   │   │   ├── vad.py       # Silero VAD (ONNX) wrapper
 │   │   │   │   ├── audio.py     # resampling, PCM16 ↔ float32, framing
 │   │   │   │   └── pipeline.py  # STT → teacher → TTS with cancellation
@@ -182,7 +184,9 @@ One WebSocket per conversation. **Binary frames carry audio; text frames carry J
 
 **Origin check.** Browsers apply no CORS to WebSockets: any page could open this socket and spend the learner's API credits. The api accepts only `VT_CORS_ORIGINS`, the page it serves itself, and clients that send no `Origin` (not browsers); others are closed with code 1008.
 
-Implemented so far: `session.start`, `input.text`, binary audio + `input.commit` (push-to-talk), `input.interrupt`, `session.end` → `session.ready`, `transcript.final`, `assistant.text.delta`/`done`, `correction`, `turn.metrics`, `error`. VAD, TTS audio and drills follow.
+Implemented so far: `session.start` (with `speak`), `session.update`, `input.text`, binary audio + `input.commit` (push-to-talk), `input.interrupt`, `session.end` → `session.ready`, `transcript.final`, `assistant.text.delta`/`done`, `assistant.audio.started` + binary audio + `assistant.audio.done`, `correction`, `turn.metrics`, `error`. VAD and drills follow.
+
+**The tutor's voice.** With `speak`, the session cuts the streamed reply into sentences (`realtime/sentences.py`: terminal punctuation followed by whitespace, a few abbreviations kept whole, Markdown and emoji removed) and synthesises them one at a time, in order, while the model keeps writing. Audio frames go out as Speaches produces them, bracketed by `assistant.audio.started` and `assistant.audio.done`; the UI schedules them back to back in one `AudioContext` (`lib/audio/player.ts`). An interruption cancels the reply task, which cancels the voice task with it, and the UI drops any frames of that turn still in flight. If the voice fails, the reply goes on as text with a `tts_failed` error.
 
 **Microphone capture.** The AudioContext runs at the device rate and the worklet averages the samples that fall in each 16 kHz output sample: Firefox and WebKit refuse to connect a microphone to a context at another rate, so asking the browser to resample is not portable. The api buffers up to 60 s per turn, rejects clips under 0.3 s, and transcribes on `input.commit`.
 
@@ -194,7 +198,8 @@ Implemented so far: `session.start`, `input.text`, binary audio + `input.commit`
 
 | `type` | Payload | Meaning |
 |---|---|---|
-| `session.start` | `topic?` (level and explanation language come from the learner profile, `/v1/learner`) | Begin a session |
+| `session.start` | `topic?`, `speak` (level and explanation language come from the learner profile, `/v1/learner`) | Begin a session; `speak` makes the tutor read its replies aloud |
+| `session.update` | `speak` | Voice on or off, from the next reply |
 | `input.text` | `text` | A typed message (same pipeline as a spoken one, without STT) |
 | `input.commit` | — | Push-to-talk released: transcribe the binary frames received since the last turn |
 | `input.interrupt` | — | User started speaking while the teacher talks |
@@ -210,8 +215,8 @@ Implemented so far: `session.start`, `input.text`, binary audio + `input.commit`
 | `transcript.final` | `text`, `turn_id`, `source` (`text` \| `voice`), `stt_ms` | What the user said or typed; `stt_ms` is the transcription time |
 | `assistant.text.delta` | `text`, `turn_id` | Streaming teacher text |
 | `assistant.text.done` | `text`, `turn_id`, `interrupted` | The whole reply (what was sent, if interrupted) |
-| `turn.metrics` | `turn_id`, `first_token_ms`, `reply_ms` | Reply latency (Phase 0 measurements) |
-| `assistant.audio.started` / `assistant.audio.finished` | `turn_id`, `sample_rate` | Bracket the binary TTS frames |
+| `turn.metrics` | `turn_id`, `first_token_ms`, `reply_ms`, `first_audio_ms` | Reply latency (Phase 0 measurements), sent once the reply and its audio are complete. Voice to voice = `stt_ms + first_audio_ms` |
+| `assistant.audio.started` / `assistant.audio.done` | `turn_id`, `sample_rate` / `turn_id`, `interrupted` | Bracket the binary TTS frames of one reply |
 | `correction` | `turn_id`, `corrected`, `items: [{original, suggestion, kind, explanation}]`, `latency_ms` | Feedback on the learner's message, computed **in parallel with the reply** (a second LLM call, JSON validated); the UI diffs `corrected` against the message, Tandem-style. A new message interrupts the reply but not the previous correction |
 | `drill.sentence` | `text`, `ipa`, `target_phonemes` | Sentence to read |
 | `pron.result` | per-phoneme verdicts + overall score | Pronunciation feedback |

@@ -1,8 +1,9 @@
 """The realtime protocol on `/ws/session` (docs/architecture.md, "Realtime protocol").
 
-Text frames carry these JSON events; binary frames will carry audio. Every event has a `type`
-(the discriminator) and a protocol version `v`. The UI's TypeScript types are generated from
-these models (they are added to the OpenAPI document, which does not describe WebSockets).
+Text frames carry these JSON events; binary frames carry audio: the learner's microphone from
+the client, the tutor's voice from the server (formats in `vt_contracts.audio`). Every event has
+a `type` (the discriminator) and a protocol version `v`. The UI's TypeScript types are generated
+from these models (they are added to the OpenAPI document, which does not describe WebSockets).
 """
 
 from typing import Annotated, Final, Literal
@@ -19,6 +20,7 @@ type ErrorCode = Literal[
     "not_started",
     "llm_failed",
     "stt_failed",
+    "tts_failed",
     "no_speech",
     "audio_too_short",
     "audio_too_long",
@@ -42,6 +44,17 @@ class SessionStart(_Event):
 
     type: Literal["session.start"] = "session.start"
     topic: str | None = Field(default=None, max_length=200)
+    speak: bool = False
+    """The tutor reads its replies aloud: binary frames between `assistant.audio.started` and
+    `assistant.audio.done`."""
+
+
+class SessionUpdate(_Event):
+    """Change session options. Applies from the next reply: to silence the current one, the
+    client stops playing it."""
+
+    type: Literal["session.update"] = "session.update"
+    speak: bool
 
 
 class InputText(_Event):
@@ -72,7 +85,7 @@ class SessionEnd(_Event):
 
 
 type ClientEvent = Annotated[
-    SessionStart | InputText | InputCommit | InputInterrupt | SessionEnd,
+    SessionStart | SessionUpdate | InputText | InputCommit | InputInterrupt | SessionEnd,
     Field(discriminator="type"),
 ]
 CLIENT_EVENT: TypeAdapter[ClientEvent] = TypeAdapter(ClientEvent)
@@ -114,6 +127,23 @@ class AssistantTextDone(_Event):
     interrupted: bool = False
 
 
+class AssistantAudioStarted(_Event):
+    """The tutor's voice for this reply follows as binary frames: PCM16 little-endian, mono, at
+    `sample_rate`, sentence by sentence as the reply is generated."""
+
+    type: Literal["assistant.audio.started"] = "assistant.audio.started"
+    turn_id: str
+    sample_rate: int
+
+
+class AssistantAudioDone(_Event):
+    """No more audio for this reply."""
+
+    type: Literal["assistant.audio.done"] = "assistant.audio.done"
+    turn_id: str
+    interrupted: bool = False
+
+
 class CorrectionItem(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -135,7 +165,11 @@ class Correction(_Event):
 
 
 class TurnMetrics(_Event):
-    """Latency of the tutor's reply, in milliseconds, from the learner's message (Phase 0)."""
+    """Latency of the tutor's reply, in milliseconds, from the learner's message (Phase 0).
+
+    Sent once the reply is complete, its audio included. For a spoken turn, the voice-to-voice
+    latency is `transcript.final.stt_ms + first_audio_ms`.
+    """
 
     type: Literal["turn.metrics"] = "turn.metrics"
     turn_id: str
@@ -143,6 +177,8 @@ class TurnMetrics(_Event):
     """Until the tutor's first word; `None` if the reply was empty."""
     reply_ms: int
     """Until the whole reply."""
+    first_audio_ms: int | None = None
+    """Until the tutor's voice starts; `None` if the reply was not spoken."""
 
 
 class ErrorEvent(_Event):
@@ -157,6 +193,8 @@ type ServerEvent = Annotated[
     | TranscriptFinal
     | AssistantTextDelta
     | AssistantTextDone
+    | AssistantAudioStarted
+    | AssistantAudioDone
     | Correction
     | TurnMetrics
     | ErrorEvent,

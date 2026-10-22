@@ -20,10 +20,11 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_LLM_TEMPERATURE` | float 0–2 | `0.6` | Teacher creativity |
 | `VT_STT_BACKEND` | `openai \| whispercpp` | `openai` | Selects STT adapter |
 | `VT_STT_BASE_URL` | URL | `http://stt:8000/v1` | STT endpoint |
-| `VT_STT_MODEL` | str | `Systran/faster-distil-whisper-small.en` | Speaches model id. Downloaded once ([voice setup](#voice-setup-speech-recognition)); on a GPU, `Systran/faster-whisper-large-v3-turbo` |
-| `VT_TTS_BASE_URL` | URL | `http://tts:8880/v1` | TTS endpoint |
-| `VT_TTS_VOICE` | str | `af_heart` | Teacher voice |
-| `VT_TTS_SPEED` | float (0, 4] | `0.95` | Slightly slower helps learners |
+| `VT_STT_MODEL` | str | `Systran/faster-distil-whisper-small.en` | Speaches model id. Downloaded once ([voice setup](#voice-setup)); on a GPU, `Systran/faster-whisper-large-v3-turbo` |
+| `VT_TTS_BASE_URL` | URL | `http://tts:8000/v1` | TTS endpoint: the same Speaches as STT. Any server with an OpenAI-compatible `/audio/speech` that streams raw PCM at 24 kHz works, e.g. Kokoro-FastAPI on port `8880` |
+| `VT_TTS_MODEL` | str | `speaches-ai/Kokoro-82M-v1.0-ONNX` | Kokoro on ONNX Runtime, downloaded once ([voice setup](#voice-setup)). Lighter (~120 MB): `speaches-ai/Kokoro-82M-v1.0-ONNX-int8`. Kokoro-FastAPI: `kokoro` |
+| `VT_TTS_VOICE` | str | `af_heart` | Tutor voice: American (`af_*`, `am_*`) or British (`bf_*`, `bm_*`) English, e.g. `am_michael`, `bf_emma` |
+| `VT_TTS_SPEED` | float 0.5–2.0 | `0.95` | Slightly slower helps learners |
 | `VT_PRON_BASE_URL` | URL | `http://pron:8001` | Pronunciation service |
 | `VT_VAD_THRESHOLD` | float 0–1 | `0.5` | Silero speech probability threshold |
 | `VT_VAD_MIN_SILENCE_MS` | int > 0 | `600` | Silence that ends a turn |
@@ -36,18 +37,27 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_LEARNER_PROFILE_PATH` | path | `/data/learner.json` | Level and explanation language saved from the UI |
 | `VT_KEEP_AUDIO` | bool | `false` | Keep raw audio for debugging |
 
-`just dev-api` runs the api on your machine, so it overrides the model URLs with the ports Compose publishes on `127.0.0.1` (stt `8000`, llm `8081`, tts `8880`, pron `8001`) and stores data in `./data`.
+`just dev-api` runs the api on your machine, so it overrides the model URLs with the ports Compose publishes on `127.0.0.1` (stt and tts `8000`, llm `8081`, pron `8001`) and stores data in `./data`.
 
-### Voice setup (speech recognition)
+### Voice setup
 
-Speech is transcribed on your machine by [Speaches](https://speaches.ai) (faster-whisper), so your voice never leaves it. Once:
+Both directions of speech run on your machine in one [Speaches](https://speaches.ai) server, so your voice never leaves it: faster-whisper turns what you say into text, and [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) (82M parameters, on ONNX Runtime) gives the tutor its voice. Once:
 
 ```bash
 docker compose --profile cpu up -d stt-cpu        # start Speaches (published on 127.0.0.1:8000)
-SPEACHES_BASE_URL=http://localhost:8000 uvx speaches-cli model download Systran/faster-distil-whisper-small.en
+export SPEACHES_BASE_URL=http://localhost:8000
+uvx speaches-cli model download Systran/faster-distil-whisper-small.en   # speech recognition, ~340 MB
+uvx speaches-cli model download speaches-ai/Kokoro-82M-v1.0-ONNX         # the tutor's voice, ~355 MB
 ```
 
-**Settings → Speech recognition** in the app checks both steps (`GET /v1/speech/status`) and shows these commands with your model. Then press the microphone in **Practice**: the UI streams PCM16 at 16 kHz over `/ws/session` while you speak and sends `input.commit` when you press it again; the api wraps the audio as WAV and calls `POST {VT_STT_BASE_URL}/audio/transcriptions` with `language=en`.
+**Settings → Voice** in the app checks each part (`GET /v1/speech/status`) and shows the commands for whatever is missing.
+
+How a spoken turn travels:
+- **You speak.** Press the microphone in **Practice**: the UI streams PCM16 at 16 kHz over `/ws/session` while you speak and sends `input.commit` when you press it again; the api wraps the audio as WAV and calls `POST {VT_STT_BASE_URL}/audio/transcriptions` with `language=en`.
+- **The tutor answers out loud** (the **Voice on** button in Practice, remembered per device). As the reply streams from the chat model, each complete sentence goes to `POST {VT_TTS_BASE_URL}/audio/speech` (`response_format=pcm`), and its audio is forwarded to the UI as binary frames while the next sentence is still being written. The tutor starts talking after one sentence, not after the whole reply.
+- **You interrupt** with the stop button, a new message or the microphone: the api cancels the reply and its voice, and the UI silences what was already queued.
+
+Each reply shows its latency: `heard` (speech recognition), `first word`, `first sound` and `reply`. **Voice to voice**, the Phase 0 target (< 1.5 s), is `heard + first sound`.
 
 ### Chat model providers
 

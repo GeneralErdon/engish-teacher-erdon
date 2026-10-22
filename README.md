@@ -53,7 +53,7 @@ Desktop app (Tauri 2 + React) — or the same UI in a browser (home lab)
 api (FastAPI) ── VAD · turn-taking · barge-in · teacher logic · notes · progress (SQLite)
    ├─► stt   speech-to-text   (Speaches / faster-whisper, or whisper.cpp)
    ├─► llm   chat model       (Ollama, llama.cpp server, LM Studio, or any OpenAI-compatible API)
-   ├─► tts   text-to-speech   (Kokoro-FastAPI)
+   ├─► tts   text-to-speech   (Kokoro, served by the same Speaches)
    └─► pron  pronunciation scoring (wav2vec2 phoneme recognition + alignment) — this repo
 ```
 
@@ -157,7 +157,7 @@ docker compose --profile cpu up -d    # use the profile you set: cpu | nvidia | 
 
 Or, with `just` installed: `just up` (it reads `VT_PROFILE` from `.env`, builds and waits until every service is healthy).
 
-Then open **http://localhost:8080**. Today it shows the backend status; voice arrives in Phase 1.
+Then open **http://localhost:8080**: pick a language model in **Settings**, then talk to your tutor in **Practice**. Speaking needs the one-time [voice setup](docs/configuration.md#voice-setup).
 
 The first start downloads several GB (images, then the chat model). The `api` comes up right away; each model service turns `healthy` in `docker compose ps` once its model is ready. Follow the downloads with `docker compose logs -f`. Every port is published on `127.0.0.1` only:
 
@@ -165,9 +165,8 @@ The first start downloads several GB (images, then the chat model). The `api` co
 |---|---|
 | 8080 | `api` + UI |
 | 8001 | `pron` |
-| 8000 | `stt` (Speaches) |
+| 8000 | `stt` and `tts` (Speaches: Whisper and Kokoro) |
 | 8081 | `llm` (llama.cpp / Ollama) |
-| 8880 | `tts` (Kokoro) |
 
 Stop everything with `docker compose --profile "*" down` (or `just down`). Downloaded models stay in Docker volumes for the next start.
 
@@ -187,7 +186,7 @@ Then pick how much of the stack you need:
 | You want to | Run | Open |
 |---|---|---|
 | Work on the UI or the api, or chat by text with a cloud model | `just dev-api` and, in a second terminal, `just dev-ui` | http://localhost:1420 |
-| Also speak (local speech recognition) | the above, plus Speaches once: [voice setup](docs/configuration.md#voice-setup-speech-recognition) | http://localhost:1420 |
+| Also talk: speak, and hear the tutor (local speech recognition and voice) | the above, plus Speaches once: [voice setup](docs/configuration.md#voice-setup) | http://localhost:1420 |
 | The full loop: models in Docker, api and UI local | `just dev` | http://localhost:1420 |
 | The desktop window | `just dev-api` (or `just models` + `just dev-api`), then `just desktop` | native window |
 | Production images with rebuild on change | `just watch` | http://localhost:8080 |
@@ -224,9 +223,10 @@ All settings live in `.env`, starting from [`.env.example`](.env.example). They 
 | `VT_LLM_API_KEY` | *(empty)* | For providers that need one. Keys saved in the app stay in the backend (`data/settings.json`, mode `0600`). |
 | `VT_LLM_HF_REPO` | `ggml-org/gemma-3-4b-it-GGUF` | GGUF that llama.cpp downloads (`cpu` / `amd` profiles). |
 | `VT_STT_BASE_URL` | `http://stt:8000/v1` | Speech-to-text endpoint. |
-| `VT_STT_MODEL` | `Systran/faster-distil-whisper-small.en` | Speaches model id, downloaded once ([voice setup](docs/configuration.md#voice-setup-speech-recognition)). |
-| `VT_TTS_BASE_URL` | `http://tts:8880/v1` | Text-to-speech endpoint. |
-| `VT_TTS_VOICE` | `af_heart` | Teacher voice. |
+| `VT_STT_MODEL` | `Systran/faster-distil-whisper-small.en` | Speaches model id, downloaded once ([voice setup](docs/configuration.md#voice-setup)). |
+| `VT_TTS_BASE_URL` | `http://tts:8000/v1` | Text-to-speech endpoint (the same Speaches). |
+| `VT_TTS_MODEL` | `speaches-ai/Kokoro-82M-v1.0-ONNX` | The tutor's voice, downloaded once ([voice setup](docs/configuration.md#voice-setup)). |
+| `VT_TTS_VOICE` | `af_heart` | Tutor voice (American or British English). |
 | `VT_PRON_BASE_URL` | `http://pron:8001` | Pronunciation scoring service. |
 | `VT_NOTES_DIR` | `/data/notes` | Where session notes are written (mount it into your Obsidian vault if you like). |
 

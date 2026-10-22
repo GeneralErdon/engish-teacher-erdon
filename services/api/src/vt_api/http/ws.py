@@ -1,6 +1,7 @@
 """`/ws/session`: the realtime conversation (protocol: `vt_contracts.ws`).
 
-Text frames carry JSON events; binary frames carry microphone audio (PCM16, mono, 16 kHz).
+Text frames carry JSON events; binary frames carry audio: the microphone from the client (PCM16,
+mono, 16 kHz), the tutor's voice from the server (PCM16, mono, 24 kHz).
 """
 
 import asyncio
@@ -10,7 +11,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import ValidationError
 
-from vt_api.ports.speech import SpeechToText
+from vt_api.ports.speech import SpeechToText, TextToSpeech
 from vt_api.realtime.session import ConversationSession, Send
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
@@ -40,14 +41,21 @@ async def session_socket(websocket: WebSocket) -> None:
     lock = asyncio.Lock()
 
     async def send(event: ServerEvent) -> None:
-        # Replies and corrections run in parallel; one frame at a time on the socket.
+        # Replies, voice and corrections run in parallel; one frame at a time on the socket.
         async with lock:
             await websocket.send_text(event.model_dump_json())
 
+    async def send_audio(pcm: bytes) -> None:
+        async with lock:
+            await websocket.send_bytes(pcm)
+
     llm: LlmService = state.container.llm
     learner: LearnerService = state.container.learner
-    speech: SpeechToText = state.container.speech
-    session = ConversationSession(send=send, llm=llm, learner=learner, speech=speech)
+    stt: SpeechToText = state.container.stt
+    tts: TextToSpeech = state.container.tts
+    session = ConversationSession(
+        send=send, send_audio=send_audio, llm=llm, learner=learner, stt=stt, tts=tts
+    )
     try:
         # The client may go away while a reply is being sent: that ends the session too.
         with suppress(WebSocketDisconnect):

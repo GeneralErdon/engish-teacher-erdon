@@ -1,4 +1,5 @@
-"""The conversation session with a scripted chat model: no network, deterministic timing."""
+"""The conversation session with a scripted chat model and fake speech: no network,
+deterministic timing."""
 
 import asyncio
 import itertools
@@ -14,8 +15,10 @@ from vt_api.ports.llm import ChatModel
 from vt_api.realtime.session import ConversationSession
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
-from vt_contracts.speech import SpeechStatus
+from vt_contracts.speech import ModelStatus
 from vt_contracts.ws import (
+    AssistantAudioDone,
+    AssistantAudioStarted,
     AssistantTextDelta,
     AssistantTextDone,
     Correction,
@@ -27,6 +30,7 @@ from vt_contracts.ws import (
     SessionEnd,
     SessionReady,
     SessionStart,
+    SessionUpdate,
     TranscriptFinal,
     TurnMetrics,
 )
@@ -81,7 +85,7 @@ class ScriptedChat:
 
 
 @dataclass
-class FakeSpeech:
+class FakeStt:
     text: str = "I have went to the beach"
     error: ProviderError | None = None
     hold: asyncio.Event | None = None
@@ -95,7 +99,31 @@ class FakeSpeech:
             raise self.error
         return self.text
 
-    async def status(self) -> SpeechStatus:
+    async def status(self) -> ModelStatus:
+        raise NotImplementedError
+
+
+@dataclass
+class FakeTts:
+    """Says each word of a sentence as one chunk of "audio" (the word's bytes)."""
+
+    error: ProviderError | None = None
+    fail_after: int = 0
+    """Words spoken before `error`."""
+    hold: asyncio.Event | None = None
+    """When set, waits on it after the first word."""
+    said: list[str] = field(default_factory=list)
+
+    async def synthesize(self, text: str) -> AsyncIterator[bytes]:
+        self.said.append(text)
+        for index, word in enumerate(text.split()):
+            if self.error and index == self.fail_after:
+                raise self.error
+            if index == 1 and self.hold:
+                await self.hold.wait()
+            yield word.encode()
+
+    async def status(self) -> ModelStatus:
         raise NotImplementedError
 
 
@@ -124,16 +152,28 @@ def events() -> list[ServerEvent]:
 
 
 @pytest.fixture
-def speech() -> FakeSpeech:
-    return FakeSpeech()
+def audio() -> list[bytes]:
+    return []
+
+
+@pytest.fixture
+def stt() -> FakeStt:
+    return FakeStt()
+
+
+@pytest.fixture
+def tts() -> FakeTts:
+    return FakeTts()
 
 
 @pytest.fixture
 def session(
     chat: ScriptedChat,
     events: list[ServerEvent],
+    audio: list[bytes],
     learner_service: LearnerService,
-    speech: FakeSpeech,
+    stt: FakeStt,
+    tts: FakeTts,
 ) -> ConversationSession:
     def factory(provider: ProviderConfig) -> ChatModel:
         return chat
@@ -153,18 +193,23 @@ def session(
     async def send(event: ServerEvent) -> None:
         events.append(event)
 
+    async def send_audio(pcm: bytes) -> None:
+        audio.append(pcm)
+
     # Each clock read advances 100 ms, so latencies are predictable.
     return ConversationSession(
         send=send,
+        send_audio=send_audio,
         llm=llm,
         learner=learner_service,
-        speech=speech,
+        stt=stt,
+        tts=tts,
         clock=lambda: next(ticks) / 10,
     )
 
 
 async def _settle() -> None:
-    for _ in range(20):
+    for _ in range(50):
         await asyncio.sleep(0)
 
 
@@ -319,7 +364,7 @@ def _speak(session: ConversationSession, pcm: bytes = HALF_A_SECOND) -> None:
 
 
 async def test_a_spoken_turn(
-    session: ConversationSession, speech: FakeSpeech, events: list[ServerEvent]
+    session: ConversationSession, stt: FakeStt, events: list[ServerEvent]
 ) -> None:
     await session.handle(SessionStart())
     _speak(session)
@@ -329,13 +374,13 @@ async def test_a_spoken_turn(
     [transcript] = _of(TranscriptFinal, events)
     assert (transcript.text, transcript.source) == ("I have went to the beach", "voice")
     assert transcript.stt_ms == 100  # one clock tick
-    assert speech.heard[0].startswith(b"RIFF")
+    assert stt.heard[0].startswith(b"RIFF")
     assert len(_of(Correction, events)) == 1
     assert len(_of(AssistantTextDone, events)) == 1
 
 
 async def test_each_turn_starts_with_fresh_audio(
-    session: ConversationSession, speech: FakeSpeech
+    session: ConversationSession, stt: FakeStt
 ) -> None:
     await session.handle(SessionStart())
     _speak(session)
@@ -344,7 +389,7 @@ async def test_each_turn_starts_with_fresh_audio(
     await session.handle(InputCommit())
     await _settle()
 
-    assert [len(wav) for wav in speech.heard] == [len(speech.heard[0])] * 2
+    assert [len(wav) for wav in stt.heard] == [len(stt.heard[0])] * 2
 
 
 @pytest.mark.parametrize(
@@ -366,14 +411,14 @@ async def test_recordings_must_be_speech_length(
 
 
 async def test_speech_recognition_failures(
-    session: ConversationSession, speech: FakeSpeech, events: list[ServerEvent]
+    session: ConversationSession, stt: FakeStt, events: list[ServerEvent]
 ) -> None:
     await session.handle(SessionStart())
-    speech.error = ProviderError("connection", "Could not connect to http://localhost:8000/v1.")
+    stt.error = ProviderError("connection", "Could not connect to http://localhost:8000/v1.")
     _speak(session)
     await session.handle(InputCommit())
     await _settle()
-    speech.error, speech.text = None, ""
+    stt.error, stt.text = None, ""
     _speak(session)
     await session.handle(InputCommit())
     await _settle()
@@ -393,16 +438,172 @@ async def test_audio_before_start_is_rejected(
 
 
 async def test_ending_stops_a_transcription(
-    session: ConversationSession, speech: FakeSpeech, events: list[ServerEvent]
+    session: ConversationSession, stt: FakeStt, events: list[ServerEvent]
 ) -> None:
-    speech.hold = asyncio.Event()
+    stt.hold = asyncio.Event()
     await session.handle(SessionStart())
     _speak(session)
     await session.handle(InputCommit())
     await _settle()
 
     await session.handle(SessionEnd())
-    speech.hold.set()
+    stt.hold.set()
     await _settle()
 
     assert _of(TranscriptFinal, events) == []
+
+
+async def test_the_tutor_speaks_each_sentence_as_it_is_written(
+    session: ConversationSession,
+    chat: ScriptedChat,
+    tts: FakeTts,
+    events: list[ServerEvent],
+    audio: list[bytes],
+) -> None:
+    chat.reply = ("Nice! ", "What did you do?")
+    chat.hold = asyncio.Event()
+    await session.handle(SessionStart(speak=True))
+    await session.handle(InputText(text="I have went to the beach"))
+    await _settle()
+
+    # The first sentence is spoken while the model is still writing the second.
+    assert (tts.said, audio) == (["Nice!"], [b"Nice!"])
+    chat.hold.set()
+    await _settle()
+
+    assert tts.said == ["Nice!", "What did you do?"]
+    assert audio == [b"Nice!", b"What", b"did", b"you", b"do?"]
+    kinds = [event.type for event in events if event.type.startswith(("assistant.", "turn."))]
+    assert kinds == [
+        "assistant.text.delta",
+        "assistant.audio.started",
+        "assistant.text.delta",
+        "assistant.text.done",
+        "assistant.audio.done",
+        "turn.metrics",
+    ]
+    assert _of(AssistantAudioStarted, events) == [
+        AssistantAudioStarted(turn_id="t1", sample_rate=24_000)
+    ]
+    assert _of(AssistantAudioDone, events) == [AssistantAudioDone(turn_id="t1")]
+    [metrics] = _of(TurnMetrics, events)
+    assert metrics.first_audio_ms is not None
+    assert metrics.first_token_ms is not None
+    assert metrics.first_audio_ms > metrics.first_token_ms
+
+
+async def test_replies_are_silent_unless_the_learner_asks(
+    session: ConversationSession, tts: FakeTts, events: list[ServerEvent], audio: list[bytes]
+) -> None:
+    await session.handle(SessionStart())
+    await session.handle(InputText(text="Hello"))
+    await _settle()
+
+    assert (tts.said, audio, _of(AssistantAudioStarted, events)) == ([], [], [])
+    assert _of(TurnMetrics, events)[0].first_audio_ms is None
+
+
+async def test_the_voice_can_be_switched_on_during_the_session(
+    session: ConversationSession, tts: FakeTts
+) -> None:
+    assert await session.handle(SessionUpdate(speak=True))  # before start: kept for later
+    await session.handle(SessionStart())
+    await session.handle(InputText(text="Hello"))
+    await _settle()
+    await session.handle(SessionUpdate(speak=True))
+    await session.handle(InputText(text="Hello again"))
+    await _settle()
+
+    assert tts.said == ["Nice!", "What did you do?"]  # the second reply only
+
+
+async def test_interrupting_stops_the_voice(
+    session: ConversationSession, tts: FakeTts, events: list[ServerEvent], audio: list[bytes]
+) -> None:
+    tts.hold = asyncio.Event()
+    await session.handle(SessionStart(speak=True))
+    await session.handle(InputText(text="Hello"))
+    await _settle()
+
+    await session.handle(InputInterrupt())
+    tts.hold.set()
+    await _settle()
+
+    assert audio == [b"Nice!", b"What"]
+    assert _of(AssistantAudioDone, events) == [AssistantAudioDone(turn_id="t1", interrupted=True)]
+    assert _of(TurnMetrics, events) == []
+
+
+async def test_interrupting_while_writing_stops_the_voice_too(
+    session: ConversationSession, chat: ScriptedChat, events: list[ServerEvent]
+) -> None:
+    chat.reply = ("Nice! ", "What did you do?")
+    chat.hold = asyncio.Event()
+    await session.handle(SessionStart(speak=True))
+    await session.handle(InputText(text="Hello"))
+    await _settle()
+
+    await session.handle(InputInterrupt())
+
+    assert _of(AssistantTextDone, events)[-1].interrupted is True
+    assert _of(AssistantAudioDone, events) == [AssistantAudioDone(turn_id="t1", interrupted=True)]
+
+
+@pytest.mark.parametrize(("fail_after", "spoken"), [(0, False), (1, True)])
+async def test_a_voice_failure_leaves_the_text_reply(
+    session: ConversationSession,
+    chat: ScriptedChat,
+    tts: FakeTts,
+    events: list[ServerEvent],
+    fail_after: int,
+    spoken: bool,
+) -> None:
+    tts.error = ProviderError("connection", "Could not connect to http://localhost:8000/v1.")
+    tts.fail_after = fail_after
+    chat.reply = ("Nice to meet you!",)
+    await session.handle(SessionStart(speak=True))
+    await session.handle(InputText(text="Hello"))
+    await _settle()
+
+    [error] = _of(ErrorEvent, events)
+    assert error.code == "tts_failed"
+    assert error.message.endswith("Could not connect to http://localhost:8000/v1.")
+    assert _of(AssistantTextDone, events)[0].text == "Nice to meet you!"
+    assert len(_of(AssistantAudioDone, events)) == int(spoken)
+    assert (_of(TurnMetrics, events)[0].first_audio_ms is not None) == spoken
+
+
+async def test_a_failed_reply_is_not_spoken(
+    session: ConversationSession, chat: ScriptedChat, tts: FakeTts
+) -> None:
+    chat.reply_error = ProviderError("auth", "nope")
+    await session.handle(SessionStart(speak=True))
+    await session.handle(InputText(text="Hello"))
+    await _settle()
+
+    assert tts.said == []
+
+
+async def test_interrupting_before_the_voice_starts(
+    session: ConversationSession, chat: ScriptedChat, events: list[ServerEvent]
+) -> None:
+    chat.hold = asyncio.Event()  # after "Nice", before the sentence ends
+    await session.handle(SessionStart(speak=True))
+    await session.handle(InputText(text="Hello"))
+    await _settle()
+
+    await session.handle(InputInterrupt())
+
+    assert _of(AssistantAudioStarted, events) == []
+    assert _of(AssistantAudioDone, events) == []
+
+
+async def test_only_words_are_spoken(
+    session: ConversationSession, chat: ScriptedChat, tts: FakeTts
+) -> None:
+    chat.reply = ("**Nice!** ", "🙂")
+    await session.handle(SessionStart(speak=True))
+    await session.handle(InputText(text="Hello"))
+    await _settle()
+
+    assert tts.said == ["Nice!"]

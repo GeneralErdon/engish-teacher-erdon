@@ -3,8 +3,9 @@
 #   docker compose --profile cpu up -d        # or: just up cpu
 #   docker compose --profile amd watch        # or: just watch amd  (rebuilds api/pron on change)
 #
-# api and pron always run. stt / llm / tts come from the profile; each variant answers on the
-# network as plain `stt`, `llm` or `tts`, so the api URLs in .env do not change between profiles.
+# api and pron always run. The speech and chat model services come from the profile; each variant
+# answers on the network as plain `stt`/`tts` (one Speaches serves both) or `llm`, so the api URLs
+# in .env do not change between profiles.
 # Every port is published on 127.0.0.1 only: voice-tutor has no authentication.
 
 name: voice-tutor
@@ -45,8 +46,6 @@ services:
       llm-cpu: { condition: service_started, required: false }
       llm-nvidia: { condition: service_started, required: false }
       llm-amd: { condition: service_started, required: false }
-      tts-cpu: { condition: service_started, required: false }
-      tts-nvidia: { condition: service_started, required: false }
     restart: unless-stopped
     develop:
       watch:
@@ -70,12 +69,14 @@ services:
         - { action: rebuild, path: packages/contracts/src }
         - { action: rebuild, path: uv.lock }
 
-  # ------------------------------------------------------------------ speech-to-text (Speaches)
-  # TODO(Phase 1): download VT_STT_MODEL on first start (Speaches serves only downloaded models).
+  # ------------------------------------------------------------------ speech (Speaches)
+  # Speech-to-text (faster-whisper) and the tutor's voice (Kokoro on ONNX Runtime) in one server.
+  # TODO(Phase 1): download VT_STT_MODEL and VT_TTS_MODEL on first start (Speaches serves only
+  # downloaded models; today: Settings -> Voice shows the commands).
   stt-cpu:
     image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu
     profiles: [cpu, amd, external]
-    networks: { default: { aliases: [stt] } }
+    networks: { default: { aliases: [stt, tts] } }
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -88,7 +89,7 @@ services:
   stt-nvidia:
     image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cuda
     profiles: [nvidia]
-    networks: { default: { aliases: [stt] } }
+    networks: { default: { aliases: [stt, tts] } }
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -156,28 +157,6 @@ services:
     restart: unless-stopped
 
   # `external` has no llm service: point VT_LLM_BASE_URL at http://host.docker.internal:<port>/v1.
-
-  # ------------------------------------------------------------------ text-to-speech (Kokoro)
-  tts-cpu:
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.0
-    profiles: [cpu, amd, external]
-    networks: { default: { aliases: [tts] } }
-    ports:
-      - "127.0.0.1:8880:8880"
-    healthcheck: &kokoro-healthcheck
-      <<: *model-healthcheck
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8880/health', timeout=3)"]
-    restart: unless-stopped
-
-  tts-nvidia:
-    image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.9.0
-    profiles: [nvidia]
-    networks: { default: { aliases: [tts] } }
-    ports:
-      - "127.0.0.1:8880:8880"
-    gpus: all
-    healthcheck: *kokoro-healthcheck
-    restart: unless-stopped
 
   # TODO(Phase 3): `https` profile with Caddy and its internal CA for LAN access
   # (docker/caddy/Caddyfile, docs/hardware.md#remote-access).

@@ -1,4 +1,4 @@
-import { Mic } from 'lucide-react'
+import { Mic, Volume2 } from 'lucide-react'
 import { m } from 'motion/react'
 
 import { Badge } from '@/components/ui/badge'
@@ -11,7 +11,7 @@ const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`
 const appear = { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 } }
 
 /** One exchange: the learner's message with its correction, then the tutor's reply. */
-export function TurnView({ turn }: { turn: Turn }) {
+export function TurnView({ turn, speaking = false }: { turn: Turn; speaking?: boolean }) {
   return (
     <li className="flex flex-col gap-3">
       <m.div {...appear} className="flex flex-col items-end gap-2 self-end sm:max-w-[80%]">
@@ -41,12 +41,21 @@ export function TurnView({ turn }: { turn: Turn }) {
           )}
         </div>
         <div className="text-muted-foreground flex items-center gap-2 px-1 font-mono text-[11px]">
+          {speaking && (
+            <Volume2
+              role="img"
+              aria-label="Speaking"
+              className="text-primary size-3.5 motion-safe:animate-pulse"
+            />
+          )}
           {turn.interrupted && <Badge variant="outline">Interrupted</Badge>}
           {turn.metrics && (
-            <span title="Latency: speech recognition, then until the tutor's first word and whole reply">
+            <span title="Latency: speech recognition, then until the tutor's first word, first sound and whole reply. Voice to voice = heard + first sound">
               {turn.sttMs !== null && `heard ${seconds(turn.sttMs)} · `}
               {turn.metrics.first_token_ms !== null &&
                 `first word ${seconds(turn.metrics.first_token_ms)} · `}
+              {turn.metrics.first_audio_ms !== null &&
+                `first sound ${seconds(turn.metrics.first_audio_ms)} · `}
               reply {seconds(turn.metrics.reply_ms)}
             </span>
           )}

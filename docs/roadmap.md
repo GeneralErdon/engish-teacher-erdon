@@ -9,7 +9,7 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 ## Phase 0: Spike (≤ 5 h)
 - [ ] Mic capture inside Tauri on **Linux (WebKitGTK)** and **Windows (WebView2)**. Go/no-go for `getUserMedia`; otherwise native `cpal` fallback. Capture is implemented (AudioWorklet, tested with fakes, 2026-10-22); the manual check in both webviews is pending
 - [ ] Silero VAD + Speaches + llama.cpp (Vulkan) + Kokoro wired in a throwaway script on the reference machine
-- [ ] Measure voice-to-voice latency. **Go if p50 < 1.5 s**. Every turn now reports speech recognition, first word and full reply times (`transcript.final.stt_ms`, `turn.metrics`), shown under each reply; TTS time is still missing
+- [ ] Measure voice-to-voice latency. **Go if p50 < 1.5 s**. Every turn reports speech recognition, first word, first sound and full reply times (`transcript.final.stt_ms`, `turn.metrics`), shown under each reply; voice to voice = heard + first sound. Pending: a run on the reference machine with the models downloaded
 - [ ] `pronounce-assess` / wav2vec2 phoneme model on 10 self-recorded sentences, compared with a commercial app. **Go if obvious errors are detected**
 
 ## Phase 1: Conversation MVP (≈ 20–25 h)
@@ -21,7 +21,8 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 - [ ] Desktop: configurable backend URL (for a home-lab server) and a "backend unavailable" screen with the next step to take
 - [x] Text conversation over `/ws/session`: streamed replies, Tandem-style corrections in the learner's chosen language, interruptions, per-turn latency (2026-10-22)
 - [x] Push-to-talk voice turns: mic capture, local speech recognition (Speaches), the same reply and correction pipeline, interrupting the tutor by speaking (2026-10-22)
-- [ ] Hands-free voice: Silero VAD (end of turn without a button), sentence-streamed TTS (Kokoro), barge-in on voice activity
+- [x] The tutor speaks: sentence-streamed TTS (Kokoro in Speaches), voice on/off per device, interrupting it stops the audio at once (2026-10-22)
+- [ ] Hands-free voice: Silero VAD (end of turn without a button), barge-in on voice activity
 - [x] Teacher: level-aware conversation + structured corrections (2026-10-22)
 - [ ] UI (desktop + browser): talk screen, live transcript, corrections panel
 - [ ] Session note (Markdown) + notes viewer
