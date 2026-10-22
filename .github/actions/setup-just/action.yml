@@ -1,0 +1,19 @@
+name: Set up just
+description: The pinned just, with one retry. The install action lists releases through GitHub's API, which now and then answers with an empty list when many jobs ask at once.
+runs:
+  using: composite
+  steps:
+    - id: first
+      uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      continue-on-error: true
+      with:
+        just-version: 1.59.0
+    - name: Wait before retrying
+      if: steps.first.outcome == 'failure'
+      shell: bash
+      run: sleep 20
+    - name: Retry
+      if: steps.first.outcome == 'failure'
+      uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      with:
+        just-version: 1.59.0
