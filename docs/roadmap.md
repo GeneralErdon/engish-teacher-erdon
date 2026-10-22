@@ -16,6 +16,9 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 - [ ] (done in bootstrap) uv workspace, tooling, pre-commit, CI skeleton
 - [ ] `vt_contracts` WS protocol + generated TS types
 - [ ] `api`: settings, container, ports, OpenAI-compatible adapters, health checks
+- [ ] Chat model providers chosen from the UI: Ollama (local and cloud), OpenAI, Anthropic, Gemini, and any OpenAI- or Anthropic-compatible endpoint. API keys stay in the api and never come back to the UI
+- [ ] UI shell: responsive navigation, Home (welcome + status), Settings, light/dark theme, typed API client generated from the api's OpenAPI schema
+- [ ] Desktop: configurable backend URL (for a home-lab server) and a "backend unavailable" screen with the next step to take
 - [ ] Realtime session: VAD, turn-taking, sentence-streamed TTS, barge-in cancellation
 - [ ] Teacher: level-aware conversation + structured corrections
 - [ ] UI (desktop + browser): talk screen, live transcript, corrections panel
@@ -34,6 +37,14 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 - [ ] Multi-arch images on GHCR; desktop installers (Windows + Linux) built in CI; release workflow
 - [ ] Demo video (2 min) and write-up
 - [ ] Choose licence (MIT planned)
+
+## Phase 4: One-click desktop install, no Docker (≈ 20–30 h)
+Goal: download the installer, open it, talk. Docker Compose stays as the server and home-lab install; both run the same code ([architecture.md#distribution](architecture.md#distribution)).
+- [ ] Tauri sidecars started and stopped by the app: `llama-server` and the whisper.cpp server (Vulkan builds cover AMD, NVIDIA and Intel GPUs on Linux and Windows; Metal on macOS), and the api as a self-contained executable
+- [ ] First-run setup screen: hardware detection, model choice by available VRAM/RAM, model download with progress, disk-space check
+- [ ] Pronunciation and TTS on ONNX Runtime, so no torch at runtime: wav2vec2 phoneme model exported to ONNX, Kokoro ONNX
+- [ ] Installers built in CI for Windows, Linux and macOS. Code signing (Windows) and notarization (macOS) when there is a budget for certificates
+- [ ] Measure: installer size, first-run time to first conversation, idle RAM. Stop and re-scope if the installer passes ~400 MB without models
 
 ## Later / maybe
 - Python 3.15 once torch, onnxruntime and ctranslate2 publish cp315 wheels (one-line change: `.python-version` + `requires-python`)
