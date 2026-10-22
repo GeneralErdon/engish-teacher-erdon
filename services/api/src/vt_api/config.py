@@ -67,10 +67,6 @@ class Settings(BaseSettings):
     # Pronunciation scoring
     pron_base_url: HttpUrl = HttpUrl("http://pron:8001")
 
-    # Voice activity detection
-    vad_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    vad_min_silence_ms: int = Field(default=600, gt=0)
-
     # Learner
     learner_l1: str = Field(default="es", pattern=r"^[a-z]{2,3}$")
     learner_level: CefrLevel = "B1"

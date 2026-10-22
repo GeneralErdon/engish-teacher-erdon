@@ -26,8 +26,6 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_TTS_VOICE` | str | `af_heart` | Tutor voice: American (`af_*`, `am_*`) or British (`bf_*`, `bm_*`) English, e.g. `am_michael`, `bf_emma` |
 | `VT_TTS_SPEED` | float 0.5–2.0 | `0.95` | Slightly slower helps learners |
 | `VT_PRON_BASE_URL` | URL | `http://pron:8001` | Pronunciation service |
-| `VT_VAD_THRESHOLD` | float 0–1 | `0.5` | Silero speech probability threshold |
-| `VT_VAD_MIN_SILENCE_MS` | int > 0 | `600` | Silence that ends a turn |
 | `VT_LEARNER_L1` | ISO 639 code | `es` | Learner's native language (explanations and typical errors) |
 | `VT_LEARNER_LEVEL` | `A1…C2` | `B1` | Starting level. Changeable in the app (**Settings → Learning**), which wins |
 | `VT_LEARNER_EXPLANATIONS` | `english \| native` | `native` | Language of correction explanations: English, or `VT_LEARNER_L1`. Changeable in the app |
@@ -78,6 +76,7 @@ How a spoken turn travels:
 - **You speak.** Press the microphone in **Practice**: the UI streams PCM16 at 16 kHz over `/ws/session` while you speak and sends `input.commit` when you press it again; the api wraps the audio as WAV and calls `POST {VT_STT_BASE_URL}/audio/transcriptions` with `language=en`.
 - **The tutor answers out loud** (the **Voice on** button in Practice, remembered per device). As the reply streams from the chat model, each complete sentence goes to `POST {VT_TTS_BASE_URL}/audio/speech` (`response_format=pcm`), and its audio is forwarded to the UI as binary frames while the next sentence is still being written. The tutor starts talking after one sentence, not after the whole reply.
 - **You interrupt** with the stop button, a new message or the microphone: the api cancels the reply and its voice, and the UI silences what was already queued.
+- **Or call** (**Call** in Practice): no buttons between turns. The app listens all the time and sends what you said after ~1 s of silence; talk over the tutor and it stops. An orb follows whoever is talking, captions show the last exchange, and the corrections wait in the chat until you hang up. Voice activity detection (Silero VAD) runs in your browser, so the api only ever receives speech. Headphones work best; with speakers, echo cancellation keeps the tutor from interrupting itself.
 
 Each reply shows its latency: `heard` (speech recognition), `first word`, `first sound` and `reply`. **Voice to voice**, the Phase 0 target (< 1.5 s), is `heard + first sound`.
 

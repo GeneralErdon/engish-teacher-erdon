@@ -23,7 +23,7 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 - [x] Text conversation over `/ws/session`: streamed replies, Tandem-style corrections in the learner's chosen language, interruptions, per-turn latency (2026-10-22)
 - [x] Push-to-talk voice turns: mic capture, local speech recognition (Speaches), the same reply and correction pipeline, interrupting the tutor by speaking (2026-10-22)
 - [x] The tutor speaks: sentence-streamed TTS (Kokoro in Speaches), voice on/off per device, interrupting it stops the audio at once (2026-10-22)
-- [ ] Hands-free voice: Silero VAD (end of turn without a button), barge-in on voice activity
+- [x] Call mode, hands-free: Silero VAD in the UI ends each turn without a button, talking over the tutor interrupts it, an orb follows whoever talks, captions and corrections for after the call (2026-10-22)
 - [x] Teacher: level-aware conversation + structured corrections (2026-10-22)
 - [ ] UI (desktop + browser): talk screen, live transcript, corrections panel
 - [ ] Session note (Markdown) + notes viewer

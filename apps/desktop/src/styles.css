@@ -170,3 +170,92 @@
   background-clip: text;
   color: transparent;
 }
+
+/* Call mode's orb (features/practice/orb.tsx). `--orb-level` (0..1) is the voice of whoever is
+   talking, set every frame; the colours come from the theme. */
+.orb {
+  --orb-level: 0;
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle at 50% 55%,
+    color-mix(in oklch, var(--primary) 55%, white) 0%,
+    var(--primary) 48%,
+    color-mix(in oklch, var(--primary), var(--highlight)) 100%
+  );
+  box-shadow: 0 0 calc(2.5rem + var(--orb-level) * 5rem)
+    color-mix(in oklch, var(--primary) 45%, transparent);
+  transform: scale(calc(0.9 + var(--orb-level) * 0.22));
+  transition:
+    transform 90ms linear,
+    box-shadow 90ms linear,
+    filter 400ms ease;
+  animation: orb-breathe 5s ease-in-out infinite;
+}
+
+/* Swirling colour inside, blurred into clouds. */
+.orb::before {
+  content: '';
+  position: absolute;
+  inset: -25%;
+  background: conic-gradient(
+    from 0deg,
+    var(--highlight),
+    transparent 25%,
+    color-mix(in oklch, var(--primary) 70%, white) 50%,
+    transparent 75%,
+    var(--highlight)
+  );
+  filter: blur(24px);
+  opacity: 0.8;
+  animation: orb-swirl 14s linear infinite;
+}
+
+/* A soft highlight, as on a glass sphere. */
+.orb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at 32% 28%, rgb(255 255 255 / 0.5), transparent 42%);
+}
+
+.orb[data-phase='starting'] {
+  filter: grayscale(0.7) opacity(0.6);
+}
+
+.orb[data-phase='thinking']::before {
+  animation-duration: 2.5s;
+}
+
+.orb[data-phase='speaking']::before {
+  opacity: 1;
+  animation-duration: 6s;
+}
+
+@keyframes orb-swirl {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes orb-breathe {
+  50% {
+    scale: 1.04;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .orb::before {
+    animation: none;
+  }
+
+  .orb {
+    transform: none;
+    transition: none;
+  }
+}

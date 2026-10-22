@@ -1,9 +1,10 @@
 import { ArrowUp, Loader2, Mic, Square } from 'lucide-react'
-import { useEffect, useState, type KeyboardEvent } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+import { clock, useElapsedSeconds } from './use-elapsed'
 import type { RecorderState } from './use-recorder'
 
 /**
@@ -107,17 +108,7 @@ export function Composer({
 
 /** "Listening… 0:04" with a live level meter. */
 function Listening({ meter }: { meter: number }) {
-  const [seconds, setSeconds] = useState(0)
-
-  useEffect(() => {
-    const started = Date.now()
-    const timer = setInterval(() => {
-      setSeconds(Math.floor((Date.now() - started) / 1000))
-    }, 250)
-    return () => {
-      clearInterval(timer)
-    }
-  }, [])
+  const seconds = useElapsedSeconds()
 
   return (
     <div role="status" className="flex min-h-9 flex-1 items-center gap-3 px-2 text-sm">
@@ -125,9 +116,7 @@ function Listening({ meter }: { meter: number }) {
         aria-hidden="true"
         className="bg-destructive size-2.5 rounded-full motion-safe:animate-pulse"
       />
-      <span>
-        Listening… {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}
-      </span>
+      <span>Listening… {clock(seconds)}</span>
       <span aria-hidden="true" className="bg-muted h-1.5 flex-1 overflow-hidden rounded-full">
         <span
           className="bg-destructive block h-full origin-left rounded-full transition-transform duration-100"

@@ -23,6 +23,7 @@
     "security": {
       "csp": {
         "default-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
         "connect-src": "'self' ipc: http://ipc.localhost http://localhost:8080 ws://localhost:8080 http://127.0.0.1:8080 ws://127.0.0.1:8080",
         "img-src": "'self' data: blob:",
         "media-src": "'self' blob: mediastream:",
@@ -33,6 +34,7 @@
       },
       "devCsp": {
         "default-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
         "connect-src": "'self' ipc: http://ipc.localhost http://localhost:8080 ws://localhost:8080 http://127.0.0.1:8080 ws://127.0.0.1:8080 ws://localhost:1420",
         "img-src": "'self' data: blob:",
         "media-src": "'self' blob: mediastream:",

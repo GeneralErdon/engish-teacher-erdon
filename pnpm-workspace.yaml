@@ -1,2 +1,7 @@
 packages:
   - apps/*
+
+# Install scripts run only where listed as true. protobufjs (via onnxruntime-web) ships a
+# postinstall that checks its optional CLI's dependencies: not needed to load ONNX models.
+allowBuilds:
+  protobufjs: false
