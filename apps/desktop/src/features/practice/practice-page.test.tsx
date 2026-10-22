@@ -15,7 +15,7 @@ const READY = {
 } as const
 
 const turn = (text = 'Yesterday I have went to the beach') =>
-  ({ type: 'transcript.final', v: 1, turn_id: 't1', text, source: 'text' }) as const
+  ({ type: 'transcript.final', v: 1, turn_id: 't1', text, source: 'text', stt_ms: null }) as const
 
 async function openPractice() {
   const view = renderApp('/practice')
@@ -96,7 +96,7 @@ describe('Practice', () => {
     const { socket } = await openPractice()
 
     socket.emit(
-      { ...turn('I went to the beach'), source: 'voice' },
+      { ...turn('I went to the beach'), source: 'voice', stt_ms: 640 },
       { type: 'assistant.text.done', v: 1, turn_id: 't1', text: 'Nice', interrupted: true },
       { type: 'turn.metrics', v: 1, turn_id: 't1', first_token_ms: null, reply_ms: 300 },
       {
@@ -112,7 +112,7 @@ describe('Practice', () => {
     expect(screen.getByText('Looks good')).toBeInTheDocument()
     expect(screen.getByText('Interrupted')).toBeInTheDocument()
     expect(screen.getByLabelText('Spoken')).toBeInTheDocument()
-    expect(screen.getByText('reply 0.3 s')).toBeInTheDocument()
+    expect(screen.getByText('heard 0.6 s · reply 0.3 s')).toBeInTheDocument()
   })
 
   it('shows a failed reply on its turn, and other errors above', async () => {

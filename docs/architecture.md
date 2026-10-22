@@ -104,7 +104,7 @@ voice-tutor/
 │   │   │   │   ├── conversation.py
 │   │   │   │   ├── corrections.py   # structured-output parsing & validation
 │   │   │   │   └── drills.py        # sentence selection by weak phonemes
-│   │   │   └── http/            # routers: health, llm, sessions, notes, progress, ws
+│   │   │   └── http/            # routers: health, llm, learner, speech, ws, sessions, notes, progress; schema.py adds WS events to OpenAPI
 │   │   └── tests/
 │   │       ├── unit/
 │   │       ├── integration/     # WS end-to-end with fake adapters
@@ -128,6 +128,7 @@ voice-tutor/
 │       ├── eslint.config.ts / vite.config.ts / tsconfig*.json
 │       ├── components.json      # shadcn/ui CLI settings
 │       ├── openapi.json         # the api's OpenAPI schema (`just types`; CI checks it is current)
+│       ├── public/pcm-recorder.worklet.js # audio thread: mic → PCM16 16 kHz frames (resamples itself)
 │       ├── src/
 │       │   ├── styles.css       # Tailwind 4 + design tokens (OKLCH, light/dark)
 │       │   ├── app/             # providers, router (hash history), query client, motion features
@@ -148,8 +149,8 @@ voice-tutor/
 │       │   │   ├── theme.ts     # system / light / dark, stored per device
 │       │   │   ├── ws/          # typed WS client (uses generated types)
 │       │   │   ├── audio/
-│       │   │   │   ├── source.ts          # AudioSource interface
-│       │   │   │   ├── webAudioSource.ts  # getUserMedia + AudioWorklet (browser, WebView2, WebKitGTK)
+│       │   │   │   ├── source.ts          # AudioSource interface, level meter, mic error messages
+│       │   │   │   ├── web-audio-source.ts # getUserMedia + AudioWorklet (browser, WebView2, WebKitGTK)
 │       │   │   │   ├── nativeSource.ts    # Tauri events from Rust capture (fallback)
 │       │   │   │   └── player.ts          # 24 kHz PCM playback queue, barge-in stop
 │       │   │   └── platform.ts  # isTauri(), backend URL resolution
@@ -181,7 +182,9 @@ One WebSocket per conversation. **Binary frames carry audio; text frames carry J
 
 **Origin check.** Browsers apply no CORS to WebSockets: any page could open this socket and spend the learner's API credits. The api accepts only `VT_CORS_ORIGINS`, the page it serves itself, and clients that send no `Origin` (not browsers); others are closed with code 1008.
 
-Implemented so far: `session.start`, `input.text`, `input.interrupt`, `session.end` → `session.ready`, `transcript.final`, `assistant.text.delta`/`done`, `correction`, `turn.metrics`, `error`. Audio and drills follow.
+Implemented so far: `session.start`, `input.text`, binary audio + `input.commit` (push-to-talk), `input.interrupt`, `session.end` → `session.ready`, `transcript.final`, `assistant.text.delta`/`done`, `correction`, `turn.metrics`, `error`. VAD, TTS audio and drills follow.
+
+**Microphone capture.** The AudioContext runs at the device rate and the worklet averages the samples that fall in each 16 kHz output sample: Firefox and WebKit refuse to connect a microphone to a context at another rate, so asking the browser to resample is not portable. The api buffers up to 60 s per turn, rejects clips under 0.3 s, and transcribes on `input.commit`.
 
 **Audio formats**
 - Client → server: PCM16 little-endian, mono, **16 kHz**, 20 ms frames (640 bytes).
@@ -193,7 +196,7 @@ Implemented so far: `session.start`, `input.text`, `input.interrupt`, `session.e
 |---|---|---|
 | `session.start` | `topic?` (level and explanation language come from the learner profile, `/v1/learner`) | Begin a session |
 | `input.text` | `text` | A typed message (same pipeline as a spoken one, without STT) |
-| `input.commit` | — | Push-to-talk released (manual end of turn) |
+| `input.commit` | — | Push-to-talk released: transcribe the binary frames received since the last turn |
 | `input.interrupt` | — | User started speaking while the teacher talks |
 | `drill.next` | `phonemes?` | Ask for the next drill sentence |
 | `session.end` | — | Finish; triggers note generation |
@@ -204,7 +207,7 @@ Implemented so far: `session.start`, `input.text`, `input.interrupt`, `session.e
 |---|---|---|
 | `session.ready` | `level`, `provider`, `model` | Session started; which model answers |
 | `vad.speech_started` / `vad.speech_stopped` | `t_ms` | Voice activity |
-| `transcript.final` | `text`, `turn_id`, `source` (`text` \| `voice`) | What the user said or typed |
+| `transcript.final` | `text`, `turn_id`, `source` (`text` \| `voice`), `stt_ms` | What the user said or typed; `stt_ms` is the transcription time |
 | `assistant.text.delta` | `text`, `turn_id` | Streaming teacher text |
 | `assistant.text.done` | `text`, `turn_id`, `interrupted` | The whole reply (what was sent, if interrupted) |
 | `turn.metrics` | `turn_id`, `first_token_ms`, `reply_ms` | Reply latency (Phase 0 measurements) |

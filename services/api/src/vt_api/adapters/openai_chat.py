@@ -25,7 +25,7 @@ def _to_openai(message: ChatMessage) -> ChatCompletionMessageParam:
             return {"role": "assistant", "content": message.content}
 
 
-def _provider_error(error: openai.APIError, base_url: str) -> ProviderError:
+def provider_error(error: openai.APIError, base_url: str) -> ProviderError:
     match error:
         case openai.APIStatusError():
             return from_status(error.status_code, error.message)
@@ -59,13 +59,13 @@ class OpenAIChatModel:
                     if choice.delta.content:
                         yield choice.delta.content
         except openai.APIError as error:
-            raise _provider_error(error, self._base_url) from error
+            raise provider_error(error, self._base_url) from error
 
     async def list_models(self) -> list[str]:
         try:
             ids = [model.id async for model in self._client.models.list()]
         except openai.APIError as error:
-            raise _provider_error(error, self._base_url) from error
+            raise provider_error(error, self._base_url) from error
         return sorted({model_id.removeprefix(_GEMINI_MODEL_PREFIX) for model_id in ids})
 
 

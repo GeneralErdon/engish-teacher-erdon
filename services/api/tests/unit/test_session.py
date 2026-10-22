@@ -14,11 +14,13 @@ from vt_api.ports.llm import ChatModel
 from vt_api.realtime.session import ConversationSession
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
+from vt_contracts.speech import SpeechStatus
 from vt_contracts.ws import (
     AssistantTextDelta,
     AssistantTextDone,
     Correction,
     ErrorEvent,
+    InputCommit,
     InputInterrupt,
     InputText,
     ServerEvent,
@@ -78,6 +80,25 @@ class ScriptedChat:
         return []
 
 
+@dataclass
+class FakeSpeech:
+    text: str = "I have went to the beach"
+    error: ProviderError | None = None
+    hold: asyncio.Event | None = None
+    heard: list[bytes] = field(default_factory=list)
+
+    async def transcribe(self, wav: bytes) -> str:
+        self.heard.append(wav)
+        if self.hold:
+            await self.hold.wait()
+        if self.error:
+            raise self.error
+        return self.text
+
+    async def status(self) -> SpeechStatus:
+        raise NotImplementedError
+
+
 class Memory:
     def __init__(self) -> None:
         self.config: LlmConfig | None = None
@@ -103,8 +124,16 @@ def events() -> list[ServerEvent]:
 
 
 @pytest.fixture
+def speech() -> FakeSpeech:
+    return FakeSpeech()
+
+
+@pytest.fixture
 def session(
-    chat: ScriptedChat, events: list[ServerEvent], learner_service: LearnerService
+    chat: ScriptedChat,
+    events: list[ServerEvent],
+    learner_service: LearnerService,
+    speech: FakeSpeech,
 ) -> ConversationSession:
     def factory(provider: ProviderConfig) -> ChatModel:
         return chat
@@ -126,7 +155,11 @@ def session(
 
     # Each clock read advances 100 ms, so latencies are predictable.
     return ConversationSession(
-        send=send, llm=llm, learner=learner_service, clock=lambda: next(ticks) / 10
+        send=send,
+        llm=llm,
+        learner=learner_service,
+        speech=speech,
+        clock=lambda: next(ticks) / 10,
     )
 
 
@@ -275,3 +308,101 @@ async def test_ending_stops_everything(
 
     assert _of(TurnMetrics, events) == []
     assert _of(Correction, events) == []
+
+
+HALF_A_SECOND = bytes(16_000)
+
+
+def _speak(session: ConversationSession, pcm: bytes = HALF_A_SECOND) -> None:
+    for start in range(0, len(pcm), 640):
+        session.audio(pcm[start : start + 640])
+
+
+async def test_a_spoken_turn(
+    session: ConversationSession, speech: FakeSpeech, events: list[ServerEvent]
+) -> None:
+    await session.handle(SessionStart())
+    _speak(session)
+    await session.handle(InputCommit())
+    await _settle()
+
+    [transcript] = _of(TranscriptFinal, events)
+    assert (transcript.text, transcript.source) == ("I have went to the beach", "voice")
+    assert transcript.stt_ms == 100  # one clock tick
+    assert speech.heard[0].startswith(b"RIFF")
+    assert len(_of(Correction, events)) == 1
+    assert len(_of(AssistantTextDone, events)) == 1
+
+
+async def test_each_turn_starts_with_fresh_audio(
+    session: ConversationSession, speech: FakeSpeech
+) -> None:
+    await session.handle(SessionStart())
+    _speak(session)
+    await session.handle(InputCommit())
+    _speak(session)
+    await session.handle(InputCommit())
+    await _settle()
+
+    assert [len(wav) for wav in speech.heard] == [len(speech.heard[0])] * 2
+
+
+@pytest.mark.parametrize(
+    ("pcm", "code"),
+    [
+        (bytes(6_400), "audio_too_short"),  # 0.2 s
+        (bytes(32_000 * 61), "audio_too_long"),
+    ],
+)
+async def test_recordings_must_be_speech_length(
+    session: ConversationSession, events: list[ServerEvent], pcm: bytes, code: str
+) -> None:
+    await session.handle(SessionStart())
+    _speak(session, pcm)
+    await session.handle(InputCommit())
+
+    assert [e.code for e in _of(ErrorEvent, events)] == [code]
+    assert _of(TranscriptFinal, events) == []
+
+
+async def test_speech_recognition_failures(
+    session: ConversationSession, speech: FakeSpeech, events: list[ServerEvent]
+) -> None:
+    await session.handle(SessionStart())
+    speech.error = ProviderError("connection", "Could not connect to http://localhost:8000/v1.")
+    _speak(session)
+    await session.handle(InputCommit())
+    await _settle()
+    speech.error, speech.text = None, ""
+    _speak(session)
+    await session.handle(InputCommit())
+    await _settle()
+
+    errors = _of(ErrorEvent, events)
+    assert [e.code for e in errors] == ["stt_failed", "no_speech"]
+    assert errors[0].message.endswith("Could not connect to http://localhost:8000/v1.")
+
+
+async def test_audio_before_start_is_rejected(
+    session: ConversationSession, events: list[ServerEvent]
+) -> None:
+    _speak(session)
+    await session.handle(InputCommit())
+
+    assert [e.code for e in _of(ErrorEvent, events)] == ["not_started"]
+
+
+async def test_ending_stops_a_transcription(
+    session: ConversationSession, speech: FakeSpeech, events: list[ServerEvent]
+) -> None:
+    speech.hold = asyncio.Event()
+    await session.handle(SessionStart())
+    _speak(session)
+    await session.handle(InputCommit())
+    await _settle()
+
+    await session.handle(SessionEnd())
+    speech.hold.set()
+    await _settle()
+
+    assert _of(TranscriptFinal, events) == []

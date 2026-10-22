@@ -186,7 +186,8 @@ Then pick how much of the stack you need:
 
 | You want to | Run | Open |
 |---|---|---|
-| Work on the UI or the api (no models needed yet) | `just dev-api` and, in a second terminal, `just dev-ui` | http://localhost:1420 |
+| Work on the UI or the api, or chat by text with a cloud model | `just dev-api` and, in a second terminal, `just dev-ui` | http://localhost:1420 |
+| Also speak (local speech recognition) | the above, plus Speaches once: [voice setup](docs/configuration.md#voice-setup-speech-recognition) | http://localhost:1420 |
 | The full loop: models in Docker, api and UI local | `just dev` | http://localhost:1420 |
 | The desktop window | `just dev-api` (or `just models` + `just dev-api`), then `just desktop` | native window |
 | Production images with rebuild on change | `just watch` | http://localhost:8080 |
@@ -223,7 +224,7 @@ All settings live in `.env`, starting from [`.env.example`](.env.example). They 
 | `VT_LLM_API_KEY` | *(empty)* | For providers that need one. Keys saved in the app stay in the backend (`data/settings.json`, mode `0600`). |
 | `VT_LLM_HF_REPO` | `ggml-org/gemma-3-4b-it-GGUF` | GGUF that llama.cpp downloads (`cpu` / `amd` profiles). |
 | `VT_STT_BASE_URL` | `http://stt:8000/v1` | Speech-to-text endpoint. |
-| `VT_STT_MODEL` | `large-v3-turbo` | Whisper variant (`.env.example` uses `small.en` for CPU). |
+| `VT_STT_MODEL` | `Systran/faster-distil-whisper-small.en` | Speaches model id, downloaded once ([voice setup](docs/configuration.md#voice-setup-speech-recognition)). |
 | `VT_TTS_BASE_URL` | `http://tts:8880/v1` | Text-to-speech endpoint. |
 | `VT_TTS_VOICE` | `af_heart` | Teacher voice. |
 | `VT_PRON_BASE_URL` | `http://pron:8001` | Pronunciation scoring service. |

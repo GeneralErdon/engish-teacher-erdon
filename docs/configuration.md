@@ -20,7 +20,7 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_LLM_TEMPERATURE` | float 0–2 | `0.6` | Teacher creativity |
 | `VT_STT_BACKEND` | `openai \| whispercpp` | `openai` | Selects STT adapter |
 | `VT_STT_BASE_URL` | URL | `http://stt:8000/v1` | STT endpoint |
-| `VT_STT_MODEL` | str | `large-v3-turbo` | Whisper variant |
+| `VT_STT_MODEL` | str | `Systran/faster-distil-whisper-small.en` | Speaches model id. Downloaded once ([voice setup](#voice-setup-speech-recognition)); on a GPU, `Systran/faster-whisper-large-v3-turbo` |
 | `VT_TTS_BASE_URL` | URL | `http://tts:8880/v1` | TTS endpoint |
 | `VT_TTS_VOICE` | str | `af_heart` | Teacher voice |
 | `VT_TTS_SPEED` | float (0, 4] | `0.95` | Slightly slower helps learners |
@@ -37,6 +37,17 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_KEEP_AUDIO` | bool | `false` | Keep raw audio for debugging |
 
 `just dev-api` runs the api on your machine, so it overrides the model URLs with the ports Compose publishes on `127.0.0.1` (stt `8000`, llm `8081`, tts `8880`, pron `8001`) and stores data in `./data`.
+
+### Voice setup (speech recognition)
+
+Speech is transcribed on your machine by [Speaches](https://speaches.ai) (faster-whisper), so your voice never leaves it. Once:
+
+```bash
+docker compose --profile cpu up -d stt-cpu        # start Speaches (published on 127.0.0.1:8000)
+SPEACHES_BASE_URL=http://localhost:8000 uvx speaches-cli model download Systran/faster-distil-whisper-small.en
+```
+
+**Settings → Speech recognition** in the app checks both steps (`GET /v1/speech/status`) and shows these commands with your model. Then press the microphone in **Practice**: the UI streams PCM16 at 16 kHz over `/ws/session` while you speak and sends `input.commit` when you press it again; the api wraps the audio as WAV and calls `POST {VT_STT_BASE_URL}/audio/transcriptions` with `language=en`.
 
 ### Chat model providers
 

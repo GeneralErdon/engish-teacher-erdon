@@ -54,7 +54,8 @@ class Settings(BaseSettings):
     # Speech-to-text
     stt_backend: SttBackend = "openai"
     stt_base_url: HttpUrl = HttpUrl("http://stt:8000/v1")
-    stt_model: str = "large-v3-turbo"
+    # Speaches model id. CPU: distil small.en (fast). GPU: Systran/faster-whisper-large-v3-turbo.
+    stt_model: str = "Systran/faster-distil-whisper-small.en"
 
     # Text-to-speech
     tts_base_url: HttpUrl = HttpUrl("http://tts:8880/v1")

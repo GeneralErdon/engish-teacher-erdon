@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from vt_api import __version__
 from vt_api.config import Settings
 from vt_api.container import Container, build_container
-from vt_api.http import health, learner, llm, ws
+from vt_api.http import health, learner, llm, speech, ws
 from vt_api.http.schema import openapi_with_events
 
 
@@ -38,6 +38,7 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     app.include_router(health.router)
     app.include_router(llm.router)
     app.include_router(learner.router)
+    app.include_router(speech.router)
     app.include_router(ws.router)
 
     app.openapi = lambda: openapi_with_events(app)  # type: ignore[method-assign]

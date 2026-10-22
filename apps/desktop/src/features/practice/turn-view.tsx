@@ -43,7 +43,8 @@ export function TurnView({ turn }: { turn: Turn }) {
         <div className="text-muted-foreground flex items-center gap-2 px-1 font-mono text-[11px]">
           {turn.interrupted && <Badge variant="outline">Interrupted</Badge>}
           {turn.metrics && (
-            <span title="Latency: until the first word, and until the whole reply">
+            <span title="Latency: speech recognition, then until the tutor's first word and whole reply">
+              {turn.sttMs !== null && `heard ${seconds(turn.sttMs)} · `}
               {turn.metrics.first_token_ms !== null &&
                 `first word ${seconds(turn.metrics.first_token_ms)} · `}
               reply {seconds(turn.metrics.reply_ms)}

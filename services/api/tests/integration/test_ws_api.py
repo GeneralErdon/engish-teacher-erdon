@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import httpx2
+import openai
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
@@ -13,6 +14,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from vt_api.adapters.chat_factory import SdkChatModelFactory
 from vt_api.adapters.json_llm_config import JsonLlmConfigRepository
+from vt_api.adapters.openai_stt import OpenAISpeechToText
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.domain.llm import environment_config
@@ -50,6 +52,11 @@ def _sse(*texts: str) -> httpx2.Response:
 
 
 def _provider(request: httpx2.Request) -> httpx2.Response:
+    if request.url.path.endswith("/audio/transcriptions"):
+        return httpx2.Response(200, json={"text": "I have went to the beach"})
+    if request.url.path.endswith("/models"):
+        model = {"id": "whisper", "object": "model", "created": 0, "owned_by": "speaches"}
+        return httpx2.Response(200, json={"object": "list", "data": [model]})
     system = json.loads(request.content)["messages"][0]["content"]
     if "corrections as JSON" in system:
         return _sse(json.dumps(CORRECTION))
@@ -72,10 +79,17 @@ def client(tmp_path: Path, learner_service: LearnerService) -> TestClient:
         chat_models=chat_models,
         environment=environment,
     )
-    app = create_app(
-        Settings(_env_file=None), container=Container(llm=llm, learner=learner_service)
+    speech = OpenAISpeechToText(
+        openai.AsyncOpenAI(
+            api_key="none",
+            base_url="http://stt/v1",
+            http_client=httpx2.AsyncClient(transport=transport),
+            max_retries=0,
+        ),
+        "whisper",
     )
-    return TestClient(app)
+    container = Container(llm=llm, learner=learner_service, speech=speech)
+    return TestClient(create_app(Settings(_env_file=None), container=container))
 
 
 def _receive(ws: WebSocketTestSession, count: int) -> list[ServerEvent]:
@@ -99,6 +113,27 @@ def test_a_conversation_over_the_socket(client: TestClient) -> None:
     )
     correction = next(event for event in events if event.type == "correction")
     assert correction.model_dump()["corrected"] == "I went to the beach"
+
+
+def test_a_spoken_turn(client: TestClient) -> None:
+    half_a_second = bytes(16_000)  # PCM16 at 16 kHz
+    with client.websocket_connect("/ws/session") as ws:
+        ws.send_text(json.dumps({"type": "session.start", "v": 1}))
+        _receive(ws, 1)
+        for start in range(0, len(half_a_second), 640):  # 20 ms frames
+            ws.send_bytes(half_a_second[start : start + 640])
+        ws.send_text(json.dumps({"type": "input.commit", "v": 1}))
+        [transcript] = _receive(ws, 1)
+        ws.send_text(json.dumps({"type": "session.end", "v": 1}))
+
+    assert transcript.model_dump() | {"stt_ms": 0} == {
+        "v": 1,
+        "type": "transcript.final",
+        "turn_id": "t1",
+        "text": "I have went to the beach",
+        "source": "voice",
+        "stt_ms": 0,
+    }
 
 
 def test_invalid_events_get_an_error_and_the_session_goes_on(client: TestClient) -> None:
@@ -139,8 +174,21 @@ def test_the_schema_describes_the_socket_events(client: TestClient) -> None:
     assert set(events["ClientEvent"]["discriminator"]["mapping"]) == {
         "session.start",
         "input.text",
+        "input.commit",
         "input.interrupt",
         "session.end",
     }
     assert "correction" in events["ServerEvent"]["discriminator"]["mapping"]
     assert client.get("/openapi.json").json() == schema  # built once, then cached
+
+
+def test_speech_status(client: TestClient) -> None:
+    status = client.get("/v1/speech/status").json()
+
+    assert status == {
+        "base_url": "http://stt/v1",
+        "model": "whisper",
+        "reachable": True,
+        "model_ready": True,
+        "detail": None,
+    }
