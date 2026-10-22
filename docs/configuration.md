@@ -13,9 +13,10 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_CORS_ORIGINS` | JSON list of origins | desktop app + Vite dev server | Origins allowed to call the api cross-origin: `tauri://localhost` (Linux/macOS app), `http://tauri.localhost` (Windows app), `http://localhost:1420` (dev). The browser UI is same-origin and needs nothing |
 | `VT_UI_DIR` | existing directory | unset | Built UI to serve at `/` (browser / home-lab mode). The Docker image sets `/app/ui` |
 | `VT_LOG_LEVEL` | `DEBUG \| INFO \| WARNING \| ERROR \| CRITICAL` | `INFO` | Logging level |
-| `VT_LLM_BASE_URL` | URL | `http://llm:8080/v1` | OpenAI-compatible chat endpoint |
+| `VT_LLM_PROVIDER` | `ollama \| ollama_cloud \| openai \| anthropic \| gemini \| openai_compatible \| anthropic_compatible` | `openai_compatible` | How to talk to `VT_LLM_BASE_URL` ([chat model providers](#chat-model-providers)) |
+| `VT_LLM_BASE_URL` | URL | `http://llm:8080/v1` | Chat endpoint. Only applies until a provider is saved from the UI |
 | `VT_LLM_MODEL` | str | `gemma-3-4b-it-q4` | Model id as the endpoint expects it (matches the `cpu` profile; `gemma-3-12b-it-q4` for a 12–16 GB GPU) |
-| `VT_LLM_API_KEY` | secret | empty | Cloud providers only |
+| `VT_LLM_API_KEY` | secret | empty | Providers that need a key |
 | `VT_LLM_TEMPERATURE` | float 0–2 | `0.6` | Teacher creativity |
 | `VT_STT_BACKEND` | `openai \| whispercpp` | `openai` | Selects STT adapter |
 | `VT_STT_BASE_URL` | URL | `http://stt:8000/v1` | STT endpoint |
@@ -30,9 +31,30 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_LEARNER_LEVEL` | `A1…C2` | `B1` | Starting level |
 | `VT_NOTES_DIR` | path | `/data/notes` | Markdown notes output |
 | `VT_DB_PATH` | path | `/data/progress.db` | SQLite database |
+| `VT_SETTINGS_PATH` | path | `/data/settings.json` | Settings saved from the UI, API keys included. Written with mode `0600` |
 | `VT_KEEP_AUDIO` | bool | `false` | Keep raw audio for debugging |
 
 `just dev-api` runs the api on your machine, so it overrides the model URLs with the ports Compose publishes on `127.0.0.1` (stt `8000`, llm `8081`, tts `8880`, pron `8001`) and stores data in `./data`.
+
+### Chat model providers
+
+Pick the chat model in the app under **Settings → Language model**, or with the `VT_LLM_*` variables. What you save in the app wins over the variables; **Reset** goes back to them.
+
+| `VT_LLM_PROVIDER` | Base URL | API key | Notes |
+|---|---|---|---|
+| `ollama` | `http://localhost:11434` (from the Docker api: `http://host.docker.internal:11434`) | no | Models you pulled with Ollama. `/v1` at the end is accepted too |
+| `ollama_cloud` | `https://ollama.com` | yes, from [ollama.com/settings/keys](https://ollama.com/settings/keys) | Free tier with usage limits |
+| `openai` | `https://api.openai.com/v1` | yes | |
+| `anthropic` | `https://api.anthropic.com` | yes | Messages API |
+| `gemini` | `https://generativelanguage.googleapis.com/v1beta/openai` | yes, from [Google AI Studio](https://aistudio.google.com/apikey) | Gemini's OpenAI-compatible endpoint; free tier with usage limits |
+| `openai_compatible` | yours, usually ending in `/v1` | if the server asks | llama.cpp (the Compose default), LM Studio, vLLM, OpenRouter, Groq... |
+| `anthropic_compatible` | yours, without `/v1` | if the server asks | Any server that speaks the Anthropic Messages API |
+
+How the keys are handled:
+- They go from the UI to the api once, are stored in `VT_SETTINGS_PATH` (mode `0600`, `./data` is gitignored) and never come back: the UI only learns *whether* a key is saved and its last four characters.
+- A saved key is only sent to the URL it was saved with. Change the URL and you type the key again.
+- The api never falls back to `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or other credentials in its own environment.
+- `DELETE /v1/llm/settings` (**Reset** in the app) deletes the file, keys included.
 
 ## pron (`vt_pron.config.Settings`)
 

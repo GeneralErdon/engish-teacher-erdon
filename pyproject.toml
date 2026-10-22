@@ -95,6 +95,7 @@ show_missing = true
 skip_covered = true
 exclude_also = [
     "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",  # interfaces: bodies are `...`
     "raise NotImplementedError",
     "@overload",
     "if __name__ == .__main__.:",
@@ -131,6 +132,7 @@ type = "forbidden"
 source_modules = [
     "vt_api.domain",
     "vt_api.ports",
+    "vt_api.services",
     "vt_api.teacher",
     "vt_api.realtime",
     "vt_api.http",

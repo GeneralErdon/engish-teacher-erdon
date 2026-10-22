@@ -22,7 +22,7 @@
 | `api` | this repo | Realtime session (VAD, turn-taking, barge-in), teacher logic, notes, progress, persistence | FastAPI: REST + `/ws/session` |
 | `pron` | this repo | Pronunciation scoring: G2P → phoneme recognition → alignment → per-phoneme verdicts | REST `POST /v1/score` |
 | `stt` | third party | Speech-to-text (Speaches/faster-whisper or whisper.cpp) | OpenAI `/v1/audio/transcriptions` (or whisper.cpp `/inference` via adapter) |
-| `llm` | third party | Chat model (Ollama, llama.cpp server, LM Studio, cloud) | OpenAI `/v1/chat/completions` (streaming) |
+| `llm` | third party | Chat model: Ollama (local or cloud), llama.cpp server, LM Studio, OpenAI, Anthropic, Gemini, or any compatible server. Chosen in the UI (`/v1/llm/*`) or with `VT_LLM_*` | OpenAI `/v1/chat/completions` or Anthropic `/v1/messages` (streaming) |
 | `tts` | third party | Text-to-speech (Kokoro-FastAPI) | OpenAI `/v1/audio/speech` (streaming PCM) |
 
 Only `api`, `pron`, `ui` and `desktop` contain our code. Everything else is replaceable infrastructure.
@@ -80,10 +80,14 @@ voice-tutor/
 │   │   │   ├── domain/          # entities & value objects (Session, Turn, Correction, PhonemeScore…)
 │   │   │   ├── ports/           # Protocols: SpeechToText, ChatModel, TextToSpeech,
 │   │   │   │                    #            PronunciationScorer, NotesRepository, ProgressRepository
+│   │   │   ├── services/        # use cases over the ports, called by http/ (llm.py: provider settings)
 │   │   │   ├── adapters/
 │   │   │   │   ├── openai_stt.py
 │   │   │   │   ├── whispercpp_stt.py
-│   │   │   │   ├── openai_chat.py
+│   │   │   │   ├── openai_chat.py   # Chat Completions: OpenAI, Gemini, Ollama, llama.cpp, LM Studio...
+│   │   │   │   ├── anthropic_chat.py# Messages API: Anthropic and compatible servers
+│   │   │   │   ├── chat_factory.py  # provider settings → the right chat adapter
+│   │   │   │   ├── json_llm_config.py # provider settings saved from the UI (mode 0600)
 │   │   │   │   ├── openai_tts.py
 │   │   │   │   ├── pron_http.py
 │   │   │   │   ├── sqlite_progress.py
@@ -99,7 +103,7 @@ voice-tutor/
 │   │   │   │   ├── conversation.py
 │   │   │   │   ├── corrections.py   # structured-output parsing & validation
 │   │   │   │   └── drills.py        # sentence selection by weak phonemes
-│   │   │   └── http/            # routers: health, sessions, notes, progress, ws
+│   │   │   └── http/            # routers: health, llm, sessions, notes, progress, ws
 │   │   └── tests/
 │   │       ├── unit/
 │   │       ├── integration/     # WS end-to-end with fake adapters
@@ -224,7 +228,7 @@ Tensor shapes are typed with `jaxtyping` and checked at runtime in tests (`beart
 | 1 | Audio is captured by the UI (webview/browser), never inside containers | Echo cancellation and noise suppression built in; Docker on Windows/macOS cannot reach the mic reliably | Native audio (PortAudio) inside containers |
 | 1b | **Tauri 2 + React** desktop shell; the same UI also runs in a browser | Native window and installers on Windows/Linux with a small footprint; one UI codebase for desktop and home lab. **Linux caveat:** WebKitGTK silently denies `getUserMedia` unless the app answers the permission request, so `permissions.rs` registers Tauri's cross-platform `Builder::on_permission_request` (Tauri ≥ 2.12) to allow the **microphone only, for the app's own origins only** (bundled UI; dev server in debug builds), and enables WebKitGTK's `enable-media-stream` setting. Fallback: native capture with `cpal` behind the same `AudioSource` interface | Electron (heavier), native toolkits (two UIs) |
 | 2 | Hand-written FastAPI WebSocket pipeline | Learning goal; full control over cancellation and latency | Pipecat / LiveKit Agents (good options; may be revisited) |
-| 3 | OpenAI-compatible interfaces everywhere | One adapter covers Ollama, llama.cpp, LM Studio, Speaches, Kokoro and cloud | Vendor SDKs per backend |
+| 3 | Standard wire protocols, not vendors: OpenAI-compatible everywhere, plus the Anthropic Messages API for chat. Each protocol through its official SDK (`openai`, `anthropic`, both on httpx2) | Two chat adapters cover Ollama (local and cloud), OpenAI, Gemini, llama.cpp, LM Studio, Anthropic and any compatible server; the same OpenAI-compatible approach covers Speaches and Kokoro. The SDKs bring streaming, retries and typed errors | One SDK per vendor; hand-written HTTP clients |
 | 4 | Separate `pron` service | Heavy ML deps (torch) isolated from the API; scalable and testable on its own | Scoring inside `api` |
 | 5 | SQLite + Markdown | Single user, zero ops, human-readable notes | Postgres |
 | 6 | uv workspace monorepo (+ pnpm workspace for the UI) | One lockfile per ecosystem, shared tooling, fast installs | Poetry / separate repos |
