@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { MessagesSquare, RotateCw, WifiOff } from 'lucide-react'
+import { MessagesSquare, MicOff, RotateCw, WifiOff } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Composer } from './composer'
 import { TurnView } from './turn-view'
 import { useConversation } from './use-conversation'
+import { useRecorder } from './use-recorder'
 
 const STARTERS = [
   'Hi! Can we talk about my weekend?',
@@ -18,9 +19,21 @@ const STARTERS = [
 
 export function PracticePage() {
   const conversation = useConversation()
+  const recorder = useRecorder(conversation.sendAudio)
   const end = useRef<HTMLDivElement>(null)
   const { turns, session, status } = conversation
   const lastReply = turns.at(-1)?.reply
+
+  const toggleMic = async () => {
+    if (recorder.state === 'recording') {
+      await recorder.stop()
+      conversation.commit()
+      return
+    }
+    // Speaking over the tutor interrupts it, like in a real conversation.
+    if (conversation.replying) conversation.interrupt()
+    await recorder.start()
+  }
 
   // Follow the conversation as it grows, including while a reply streams in.
   useEffect(() => {
@@ -100,12 +113,21 @@ export function PracticePage() {
       )}
       <div ref={end} />
 
-      <div className="sticky bottom-24 md:bottom-6">
+      <div className="sticky bottom-24 flex flex-col gap-2 md:bottom-6">
+        {recorder.error && (
+          <Alert variant="destructive">
+            <MicOff />
+            <AlertTitle>{recorder.error}</AlertTitle>
+          </Alert>
+        )}
         <Composer
           disabled={!session || status !== 'open'}
           replying={conversation.replying}
+          recorder={recorder.state}
+          meter={recorder.meter}
           onSend={conversation.say}
           onStop={conversation.interrupt}
+          onMic={() => void toggleMic()}
         />
       </div>
     </div>

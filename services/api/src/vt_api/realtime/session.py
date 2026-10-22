@@ -1,5 +1,5 @@
-"""One conversation over `/ws/session`: the learner's turns, the tutor's streamed replies and
-the corrections, which run alongside each reply.
+"""One conversation over `/ws/session`: the learner's turns (typed, or spoken and transcribed),
+the tutor's streamed replies and the corrections, which run alongside each reply.
 
 A new message interrupts the reply in progress (barge-in) but not the correction of the
 previous message: that feedback is still useful. Everything stops when the session closes.
@@ -13,8 +13,10 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Literal, assert_never
 
+from vt_api.domain.audio import duration_s, to_wav
 from vt_api.domain.llm import PROVIDERS, ChatMessage, ProviderError
 from vt_api.ports.llm import ChatModel
+from vt_api.ports.speech import SpeechToText
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
 from vt_api.teacher.conversation import correction_messages, reply_messages
@@ -25,7 +27,9 @@ from vt_contracts.ws import (
     AssistantTextDone,
     ClientEvent,
     Correction,
+    ErrorCode,
     ErrorEvent,
+    InputCommit,
     InputInterrupt,
     InputText,
     ServerEvent,
@@ -43,6 +47,11 @@ type Send = Callable[[ServerEvent], Awaitable[None]]
 HISTORY_LIMIT = 20
 """Messages sent to the model with each reply: enough context, bounded cost."""
 
+MIN_SPEECH_S = 0.3
+"""Shorter recordings are accidental clicks, not speech."""
+MAX_SPEECH_S = 60.0
+"""Bounds the memory one connection can use; longer turns are not conversation."""
+
 
 @dataclass(frozen=True, slots=True)
 class _Started:
@@ -58,17 +67,22 @@ class ConversationSession:
         send: Send,
         llm: LlmService,
         learner: LearnerService,
+        speech: SpeechToText,
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self._send = send
         self._llm = llm
         self._learner = learner
+        self._speech = speech
         self._clock = clock
         self._started: _Started | None = None
         self._history: list[ChatMessage] = []
         self._turns = 0
         self._reply: asyncio.Task[None] | None = None
-        self._corrections: set[asyncio.Task[None]] = set()
+        self._background: set[asyncio.Task[None]] = set()
+        """Corrections and transcriptions: they outlive interruptions, not the session."""
+        self._audio = bytearray()
+        self._audio_overflow = False
 
     async def handle(self, event: ClientEvent) -> bool:
         """Apply one client event. `False` once the session is over."""
@@ -77,6 +91,8 @@ class ConversationSession:
                 await self._start(event.topic)
             case InputText():
                 await self.learner_said(event.text, "text")
+            case InputCommit():
+                await self._commit_audio()
             case InputInterrupt():
                 await self.interrupt()
             case SessionEnd():
@@ -96,26 +112,71 @@ class ConversationSession:
             )
         )
 
-    async def learner_said(self, text: str, source: Literal["text", "voice"]) -> None:
+    def audio(self, chunk: bytes) -> None:
+        """Buffer microphone audio until `input.commit`."""
+        if duration_s(len(self._audio) + len(chunk)) > MAX_SPEECH_S:
+            self._audio_overflow = True
+            return
+        self._audio.extend(chunk)
+
+    async def _commit_audio(self) -> None:
+        pcm, overflow = bytes(self._audio), self._audio_overflow
+        self._audio.clear()
+        self._audio_overflow = False
+        if self._started is None:
+            await self._not_started()
+            return
+        if overflow:
+            await self._error("audio_too_long", f"Keep each turn under {MAX_SPEECH_S:.0f} s.")
+        elif duration_s(len(pcm)) < MIN_SPEECH_S:
+            await self._error(
+                "audio_too_short", "Too short: press the mic, speak, then press it again."
+            )
+        else:
+            self._track(asyncio.create_task(self._run_voice(pcm)))
+
+    async def _run_voice(self, pcm: bytes) -> None:
+        since = self._clock()
+        try:
+            text = await self._speech.transcribe(to_wav(pcm))
+        except ProviderError as error:
+            await self._error("stt_failed", f"Speech recognition failed. {error.message}")
+            return
+        if not text:
+            await self._error("no_speech", "I did not catch that. Try again, closer to the mic.")
+            return
+        await self.learner_said(text, "voice", stt_ms=self._elapsed_ms(since))
+
+    async def _not_started(self) -> None:
+        await self._send(
+            ErrorEvent(code="not_started", message="Send session.start first.", retryable=False)
+        )
+
+    async def _error(self, code: ErrorCode, message: str) -> None:
+        await self._send(ErrorEvent(code=code, message=message, retryable=True))
+
+    def _track(self, task: asyncio.Task[None]) -> None:
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+
+    async def learner_said(
+        self, text: str, source: Literal["text", "voice"], stt_ms: int | None = None
+    ) -> None:
         """Start a turn: interrupt the tutor, then reply and correct in parallel."""
         if self._started is None:
-            await self._send(
-                ErrorEvent(code="not_started", message="Send session.start first.", retryable=False)
-            )
+            await self._not_started()
             return
         await self.interrupt()
         self._turns += 1
         turn_id = f"t{self._turns}"
         started_at = self._clock()
         self._history.append(ChatMessage("user", text))
-        await self._send(TranscriptFinal(turn_id=turn_id, text=text, source=source))
+        await self._send(TranscriptFinal(turn_id=turn_id, text=text, source=source, stt_ms=stt_ms))
 
         self._reply = asyncio.create_task(self._run_reply(self._started, turn_id, started_at))
-        correction = asyncio.create_task(
-            self._run_correction(self._started, turn_id, text, started_at)
+        self._track(
+            asyncio.create_task(self._run_correction(self._started, turn_id, text, started_at))
         )
-        self._corrections.add(correction)
-        correction.add_done_callback(self._corrections.discard)
 
     async def interrupt(self) -> None:
         """Stop the reply in progress, if any; its partial text stays in the history."""
@@ -125,7 +186,7 @@ class ConversationSession:
 
     async def close(self) -> None:
         await self.interrupt()
-        for task in list(self._corrections):
+        for task in list(self._background):
             await _cancel(task)
 
     def _elapsed_ms(self, since: float) -> int:
@@ -142,7 +203,7 @@ class ConversationSession:
                 parts.append(chunk)
                 await self._send(AssistantTextDelta(turn_id=turn_id, text=chunk))
         except ProviderError as error:
-            await self._send(ErrorEvent(code="llm_failed", message=error.message, retryable=True))
+            await self._error("llm_failed", error.message)
             return
         except asyncio.CancelledError:
             self._remember_reply(parts)

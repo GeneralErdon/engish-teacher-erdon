@@ -10,17 +10,23 @@ import openai
 from vt_api.adapters.chat_factory import SdkChatModelFactory
 from vt_api.adapters.json_learner_profile import JsonLearnerProfileRepository
 from vt_api.adapters.json_llm_config import JsonLlmConfigRepository
+from vt_api.adapters.openai_stt import OpenAISpeechToText
 from vt_api.config import Settings
 from vt_api.domain.llm import environment_config
+from vt_api.ports.speech import SpeechToText
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
 from vt_contracts.learner import LearnerProfile
+
+STT_TIMEOUT_S = 60.0
+"""A long turn on a slow CPU can take a while to transcribe."""
 
 
 @dataclass(frozen=True, slots=True)
 class Container:
     llm: LlmService
     learner: LearnerService
+    speech: SpeechToText
 
 
 @asynccontextmanager
@@ -32,6 +38,19 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
             anthropic_http=anthropic.DefaultAsyncHttpxClient(),
         )
         stack.push_async_callback(chat_models.aclose)
+        stt_http = openai.DefaultAsyncHttpxClient()
+        stack.push_async_callback(stt_http.aclose)
+        speech = OpenAISpeechToText(
+            openai.AsyncOpenAI(
+                # Local Speaches needs no key; never let the SDK fall back to OPENAI_API_KEY.
+                api_key="none",
+                base_url=str(settings.stt_base_url),
+                http_client=stt_http,
+                timeout=STT_TIMEOUT_S,
+                max_retries=0,
+            ),
+            settings.stt_model,
+        )
         environment = environment_config(
             kind=settings.llm_provider,
             base_url=str(settings.llm_base_url),
@@ -51,4 +70,5 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
                 ),
                 native_language=settings.learner_l1,
             ),
+            speech=speech,
         )

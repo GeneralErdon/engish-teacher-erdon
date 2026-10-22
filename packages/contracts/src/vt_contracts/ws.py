@@ -14,7 +14,15 @@ from vt_contracts.learner import CefrLevel
 PROTOCOL_VERSION: Final = 1
 
 type CorrectionKind = Literal["grammar", "vocabulary", "spelling", "naturalness"]
-type ErrorCode = Literal["bad_event", "not_started", "llm_failed", "internal"]
+type ErrorCode = Literal[
+    "bad_event",
+    "not_started",
+    "llm_failed",
+    "stt_failed",
+    "no_speech",
+    "audio_too_short",
+    "audio_too_long",
+]
 
 
 class _Event(BaseModel):
@@ -43,6 +51,16 @@ class InputText(_Event):
     text: str = Field(min_length=1, max_length=4000)
 
 
+class InputCommit(_Event):
+    """The learner finished speaking (push-to-talk released): transcribe the audio sent so far.
+
+    Audio travels before this event as binary frames: PCM16 little-endian, mono, 16 kHz
+    (`vt_contracts.audio`).
+    """
+
+    type: Literal["input.commit"] = "input.commit"
+
+
 class InputInterrupt(_Event):
     """Stop the tutor's current reply (the learner started a new turn or pressed stop)."""
 
@@ -54,7 +72,8 @@ class SessionEnd(_Event):
 
 
 type ClientEvent = Annotated[
-    SessionStart | InputText | InputInterrupt | SessionEnd, Field(discriminator="type")
+    SessionStart | InputText | InputCommit | InputInterrupt | SessionEnd,
+    Field(discriminator="type"),
 ]
 CLIENT_EVENT: TypeAdapter[ClientEvent] = TypeAdapter(ClientEvent)
 
@@ -77,6 +96,8 @@ class TranscriptFinal(_Event):
     turn_id: str
     text: str
     source: Literal["text", "voice"]
+    stt_ms: int | None = None
+    """Speech-to-text time, from the end of speech to this event (voice turns only)."""
 
 
 class AssistantTextDelta(_Event):

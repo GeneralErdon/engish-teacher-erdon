@@ -40,7 +40,7 @@ describe('Home', () => {
     const { user } = renderApp('/', api)
 
     expect(await screen.findByText('Offline')).toBeInTheDocument()
-    expect(screen.getByText('Waiting for the backend.')).toBeInTheDocument()
+    expect(screen.getAllByText('Waiting for the backend.')).toHaveLength(2) // model and voice cards
     expect(screen.getAllByRole('status')[0]).toHaveTextContent('API offline')
 
     await user.click(screen.getByRole('button', { name: 'Retry' }))

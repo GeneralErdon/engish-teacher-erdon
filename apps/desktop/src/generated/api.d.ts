@@ -127,6 +127,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/speech/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Speech Status
+         * @description Whether the speech-to-text server answers and has the configured model.
+         */
+        get: operations["speech_status_v1_speech_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -176,7 +196,7 @@ export interface components {
         };
         /** @enum {string} */
         CefrLevel: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
-        ClientEvent: components["schemas"]["SessionStart"] | components["schemas"]["InputText"] | components["schemas"]["InputInterrupt"] | components["schemas"]["SessionEnd"];
+        ClientEvent: components["schemas"]["SessionStart"] | components["schemas"]["InputText"] | components["schemas"]["InputCommit"] | components["schemas"]["InputInterrupt"] | components["schemas"]["SessionEnd"];
         /**
          * ConnectionTestRequest
          * @description Body of `POST /v1/llm/test`.
@@ -245,7 +265,7 @@ export interface components {
         /** @enum {string} */
         CorrectionKind: "grammar" | "vocabulary" | "spelling" | "naturalness";
         /** @enum {string} */
-        ErrorCode: "bad_event" | "not_started" | "llm_failed" | "internal";
+        ErrorCode: "bad_event" | "not_started" | "llm_failed" | "stt_failed" | "no_speech" | "audio_too_short" | "audio_too_long";
         /** ErrorEvent */
         ErrorEvent: {
             code: components["schemas"]["ErrorCode"];
@@ -289,6 +309,26 @@ export interface components {
             status: "ok";
             /** Version */
             version: string;
+        };
+        /**
+         * InputCommit
+         * @description The learner finished speaking (push-to-talk released): transcribe the audio sent so far.
+         *
+         *     Audio travels before this event as binary frames: PCM16 little-endian, mono, 16 kHz
+         *     (`vt_contracts.audio`).
+         */
+        InputCommit: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "input.commit";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
         };
         /**
          * InputInterrupt
@@ -505,6 +545,19 @@ export interface components {
              */
             v: 1;
         };
+        /** SpeechStatus */
+        SpeechStatus: {
+            /** Base Url */
+            base_url: string;
+            /** Detail */
+            detail?: string | null;
+            /** Model */
+            model: string;
+            /** Model Ready */
+            model_ready: boolean;
+            /** Reachable */
+            reachable: boolean;
+        };
         /**
          * TranscriptFinal
          * @description What the learner said (or typed) in this turn, as the server will use it.
@@ -515,6 +568,11 @@ export interface components {
              * @enum {string}
              */
             source: "text" | "voice";
+            /**
+             * Stt Ms
+             * @default null
+             */
+            stt_ms: number | null;
             /** Text */
             text: string;
             /** Turn Id */
@@ -813,6 +871,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    speech_status_v1_speech_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechStatus"];
                 };
             };
         };

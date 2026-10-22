@@ -94,6 +94,7 @@
       "ClientEvent": {
         "discriminator": {
           "mapping": {
+            "input.commit": "#/components/schemas/InputCommit",
             "input.interrupt": "#/components/schemas/InputInterrupt",
             "input.text": "#/components/schemas/InputText",
             "session.end": "#/components/schemas/SessionEnd",
@@ -107,6 +108,9 @@
           },
           {
             "$ref": "#/components/schemas/InputText"
+          },
+          {
+            "$ref": "#/components/schemas/InputCommit"
           },
           {
             "$ref": "#/components/schemas/InputInterrupt"
@@ -295,7 +299,10 @@
           "bad_event",
           "not_started",
           "llm_failed",
-          "internal"
+          "stt_failed",
+          "no_speech",
+          "audio_too_short",
+          "audio_too_long"
         ],
         "type": "string"
       },
@@ -384,6 +391,30 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "InputCommit": {
+        "additionalProperties": false,
+        "description": "The learner finished speaking (push-to-talk released): transcribe the audio sent so far.\n\nAudio travels before this event as binary frames: PCM16 little-endian, mono, 16 kHz\n(`vt_contracts.audio`).",
+        "properties": {
+          "type": {
+            "const": "input.commit",
+            "default": "input.commit",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type"
+        ],
+        "title": "InputCommit",
         "type": "object"
       },
       "InputInterrupt": {
@@ -878,6 +909,46 @@
         "title": "SessionStart",
         "type": "object"
       },
+      "SpeechStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "model_ready": {
+            "title": "Model Ready",
+            "type": "boolean"
+          },
+          "reachable": {
+            "title": "Reachable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "base_url",
+          "model",
+          "reachable",
+          "model_ready"
+        ],
+        "title": "SpeechStatus",
+        "type": "object"
+      },
       "TranscriptFinal": {
         "additionalProperties": false,
         "description": "What the learner said (or typed) in this turn, as the server will use it.",
@@ -889,6 +960,18 @@
             ],
             "title": "Source",
             "type": "string"
+          },
+          "stt_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stt Ms"
           },
           "text": {
             "title": "Text",
@@ -916,7 +999,8 @@
           "type",
           "turn_id",
           "text",
-          "source"
+          "source",
+          "stt_ms"
         ],
         "title": "TranscriptFinal",
         "type": "object"
@@ -1296,6 +1380,28 @@
         "summary": "Test Connection",
         "tags": [
           "llm"
+        ]
+      }
+    },
+    "/v1/speech/status": {
+      "get": {
+        "description": "Whether the speech-to-text server answers and has the configured model.",
+        "operationId": "speech_status_v1_speech_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Speech Status",
+        "tags": [
+          "speech"
         ]
       }
     }

@@ -9,6 +9,8 @@ export class FakeSocket {
 
   readonly url: string
   readonly sent: ClientEvent[] = []
+  /** Binary frames (microphone audio). */
+  readonly audio: ArrayBuffer[] = []
   closed = false
   onopen: ((event: Event) => void) | null = null
   onmessage: ((event: MessageEvent<string>) => void) | null = null
@@ -25,8 +27,9 @@ export class FakeSocket {
     return socket
   }
 
-  send(data: string) {
-    this.sent.push(JSON.parse(data) as ClientEvent)
+  send(data: string | ArrayBuffer) {
+    if (typeof data === 'string') this.sent.push(JSON.parse(data) as ClientEvent)
+    else this.audio.push(data)
   }
 
   close() {

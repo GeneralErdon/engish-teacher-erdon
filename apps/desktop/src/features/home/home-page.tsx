@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useLlmSettings, useProviders } from '@/features/settings/use-llm'
+import { useSpeechStatus } from '@/features/settings/use-speech'
 import { useHealth } from '@/features/status/use-health'
 import { backendUrl } from '@/lib/platform'
 import { cn } from '@/lib/utils'
@@ -34,6 +35,7 @@ export function HomePage() {
   const online = health.isSuccess
   const settings = useLlmSettings({ enabled: online })
   const providers = useProviders({ enabled: online })
+  const speech = useSpeechStatus({ enabled: online })
   const active = settings.data?.active
   const provider = providers.data?.find((p) => p.kind === active)
   const model = settings.data?.providers.find((p) => p.kind === active)?.model
@@ -137,8 +139,34 @@ export function HomePage() {
           )}
         </StatusCard>
 
-        <StatusCard icon={<Mic />} title="Voice" badge={<Badge variant="outline">Soon</Badge>}>
-          <p>Talking instead of typing is next: speech recognition runs on your machine.</p>
+        <StatusCard
+          icon={<Mic />}
+          title="Voice"
+          badge={
+            speech.data &&
+            (speech.data.model_ready ? (
+              <Badge className="bg-success/15 text-success">Ready</Badge>
+            ) : (
+              <Badge variant="outline">Not set up</Badge>
+            ))
+          }
+        >
+          {!online && <p>Waiting for the backend.</p>}
+          {online && !speech.data && <Skeleton className="h-4 w-40" />}
+          {speech.data && (
+            <div className="flex flex-col items-start gap-2">
+              <p>
+                {speech.data.model_ready
+                  ? 'Press the mic in Practice and speak.'
+                  : 'Speech recognition runs on your machine; it needs a one-time setup.'}
+              </p>
+              {!speech.data.model_ready && (
+                <Button size="sm" variant="link" className="h-auto px-0" asChild>
+                  <Link to="/settings">Set it up</Link>
+                </Button>
+              )}
+            </div>
+          )}
         </StatusCard>
       </m.section>
 
@@ -154,11 +182,11 @@ export function HomePage() {
             Ollama, Ollama Cloud, OpenAI, Anthropic, Gemini or any compatible server.
           </Step>
           <Step n={3} done={false} title="Have your first conversation">
-            Write to your tutor in{' '}
+            Write or speak to your tutor in{' '}
             <Link to="/practice" className="text-primary underline-offset-4 hover:underline">
               Practice
             </Link>
-            ; voice is coming next.
+            .
           </Step>
         </ol>
       </m.section>

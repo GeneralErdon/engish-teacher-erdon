@@ -1,12 +1,17 @@
-"""`/ws/session`: the realtime conversation (protocol: `vt_contracts.ws`)."""
+"""`/ws/session`: the realtime conversation (protocol: `vt_contracts.ws`).
+
+Text frames carry JSON events; binary frames carry microphone audio (PCM16, mono, 16 kHz).
+"""
 
 import asyncio
+from contextlib import suppress
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import ValidationError
 
-from vt_api.realtime.session import ConversationSession
+from vt_api.ports.speech import SpeechToText
+from vt_api.realtime.session import ConversationSession, Send
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
 from vt_contracts.ws import CLIENT_EVENT, ErrorEvent, ServerEvent
@@ -41,19 +46,29 @@ async def session_socket(websocket: WebSocket) -> None:
 
     llm: LlmService = state.container.llm
     learner: LearnerService = state.container.learner
-    session = ConversationSession(send=send, llm=llm, learner=learner)
+    speech: SpeechToText = state.container.speech
+    session = ConversationSession(send=send, llm=llm, learner=learner, speech=speech)
     try:
-        while True:
-            message = await websocket.receive_text()
-            try:
-                event = CLIENT_EVENT.validate_json(message)
-            except ValidationError as error:
-                await send(ErrorEvent(code="bad_event", message=str(error), retryable=False))
-                continue
-            if not await session.handle(event):
-                await websocket.close()
-                break
-    except WebSocketDisconnect:
-        pass
+        # The client may go away while a reply is being sent: that ends the session too.
+        with suppress(WebSocketDisconnect):
+            await _serve(websocket, session, send)
     finally:
         await session.close()
+
+
+async def _serve(websocket: WebSocket, session: ConversationSession, send: Send) -> None:
+    while True:
+        message = await websocket.receive()
+        if message["type"] == "websocket.disconnect":
+            return
+        if (audio := message.get("bytes")) is not None:
+            session.audio(audio)
+            continue
+        try:
+            event = CLIENT_EVENT.validate_json(message.get("text") or "")
+        except ValidationError as error:
+            await send(ErrorEvent(code="bad_event", message=str(error), retryable=False))
+            continue
+        if not await session.handle(event):
+            await websocket.close()
+            return

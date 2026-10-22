@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, GraduationCap, Palette, Server } from 'lucide-react'
+import { AlertTriangle, AudioLines, Bot, GraduationCap, Palette, Server } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -12,6 +12,7 @@ import { backendUrl } from '@/lib/platform'
 import { AppearanceSection } from './appearance-section'
 import { LanguageModelForm } from './language-model-form'
 import { LearningSection } from './learning-section'
+import { SpeechSection } from './speech-section'
 import { useLlmSettings, useProviders } from './use-llm'
 
 export function SettingsPage() {
@@ -30,6 +31,14 @@ export function SettingsPage() {
         description="Pick who answers: a model on this computer, a free cloud tier, or your own API key. Keys stay in the backend and are never shown again."
       >
         <LanguageModelSection />
+      </Section>
+
+      <Section
+        icon={<AudioLines />}
+        title="Speech recognition"
+        description="Turns what you say into text, on your own machine: your voice never leaves it."
+      >
+        <SpeechSection />
       </Section>
 
       <Section

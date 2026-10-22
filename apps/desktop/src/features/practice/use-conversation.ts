@@ -12,6 +12,8 @@ export interface Turn {
   id: string
   text: string
   source: 'text' | 'voice'
+  /** Speech-to-text time, for spoken turns. */
+  sttMs: number | null
   reply: string
   replyDone: boolean
   interrupted: boolean
@@ -44,12 +46,15 @@ export function reducer(state: ConversationState, action: Action): ConversationS
     case 'transcript.final':
       return {
         ...state,
+        // A new turn made it through: earlier problems (a failed recording, say) are over.
+        error: undefined,
         turns: [
           ...state.turns,
           {
             id: action.turn_id,
             text: action.text,
             source: action.source,
+            sttMs: action.stt_ms,
             reply: '',
             replyDone: false,
             interrupted: false,
@@ -128,6 +133,11 @@ export function useConversation(url = sessionUrl(backendUrl())) {
     socket.current?.send(JSON.stringify(event))
   }, [])
 
+  /** Microphone audio for the turn being recorded (binary frames). */
+  const sendAudio = useCallback((pcm: ArrayBuffer) => {
+    socket.current?.send(pcm)
+  }, [])
+
   const last = state.turns.at(-1)
   return {
     ...state,
@@ -137,6 +147,11 @@ export function useConversation(url = sessionUrl(backendUrl())) {
     },
     interrupt: () => {
       send({ type: 'input.interrupt', v: 1 })
+    },
+    sendAudio,
+    /** The learner stopped speaking: transcribe and answer. */
+    commit: () => {
+      send({ type: 'input.commit', v: 1 })
     },
     reconnect: nextAttempt,
   }

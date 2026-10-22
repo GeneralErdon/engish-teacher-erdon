@@ -70,6 +70,7 @@ type Reply = Response | (() => Response | Promise<Response>)
 
 interface Overrides {
   health?: Reply
+  speech?: Reply
   learner?: Reply
   saveLearner?: Reply
   providers?: Reply
@@ -83,6 +84,7 @@ interface Overrides {
 export interface FakeApi {
   fetch: Mock<(request: Request) => Promise<Response>>
   learner: Schemas['LearnerProfileView']
+  speech: Schemas['SpeechStatus']
   /** Bodies the UI sent, by "METHOD /path". */
   sent: Map<string, unknown[]>
   settings: Settings
@@ -98,6 +100,13 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
     sent,
     settings: structuredClone(ENVIRONMENT),
     learner: { level: 'B1', explanations: 'native', native_language: 'es', source: 'environment' },
+    speech: {
+      base_url: 'http://localhost:8000/v1',
+      model: 'Systran/faster-distil-whisper-small.en',
+      reachable: true,
+      model_ready: true,
+      detail: null,
+    },
   }
 
   const reply = (override: Reply | undefined, fallback: () => Response | Promise<Response>) => {
@@ -117,6 +126,8 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
         return reply(overrides.health, () =>
           json({ status: 'ok', service: 'api', version: '0.1.0' }),
         )
+      case 'GET /v1/speech/status':
+        return reply(overrides.speech, () => json(api.speech))
       case 'GET /v1/learner':
         return reply(overrides.learner, () => json(api.learner))
       case 'PUT /v1/learner':
