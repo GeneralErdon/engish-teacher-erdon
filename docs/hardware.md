@@ -51,6 +51,8 @@ Always leave ~2 GB of headroom when STT shares the GPU with the LLM.
 
 Browsers require a **secure context** for `getUserMedia`: `http://localhost` works, `http://192.168.x.x` does not.
 
+**While developing:** `just dev-api` + `just dev-lan` serve the UI on `https://<your IP>:1420` with a self-signed certificate (accept the warning once on the phone), and Vite forwards the api, which keeps listening on localhost.
+
 **Option A: Caddy with a local CA (LAN)** *(Phase 3, not available yet: the `https` profile is still a TODO in `compose.yaml`)*
 ```bash
 docker compose --profile cpu --profile https up -d

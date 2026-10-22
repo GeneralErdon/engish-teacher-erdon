@@ -188,11 +188,13 @@ Then pick how much of the stack you need:
 | Work on the UI or the api, or chat by text with a cloud model | `just dev-api` and, in a second terminal, `just dev-ui` | http://localhost:1420 |
 | Also talk: speak, and hear the tutor (local speech recognition and voice) | the above, plus Speaches once: [voice setup](docs/configuration.md#voice-setup) | http://localhost:1420 |
 | The full loop: models in Docker, api and UI local | `just dev` | http://localhost:1420 |
+| Try it on your phone (same Wi-Fi) | `just dev-api` and, in a second terminal, `just dev-lan` | https://&lt;your computer's IP&gt;:1420 (accept the self-signed certificate once) |
 | The desktop window | `just dev-api` (or `just models` + `just dev-api`), then `just desktop` | native window |
 | Production images with rebuild on change | `just watch` | http://localhost:8080 |
 
 - `just dev-api` runs uvicorn with auto-reload on http://localhost:8080 (API docs at `/docs`).
-- `just dev-ui` runs Vite with hot reload on http://localhost:1420.
+- `just dev-ui` runs Vite with hot reload on http://localhost:1420. It forwards `/v1`, `/healthz` and `/ws` to the api, so the page talks to one origin.
+- `just dev-lan` is `dev-ui` on every network interface, over HTTPS with a self-signed certificate: phones only open the microphone on secure pages. The api stays on localhost; the phone reaches it through Vite. Vite prints the address under `Network`.
 - `just dev` = `just models` (pron + model services in Docker, waits until healthy) + `dev-api` + `dev-ui` in parallel.
 - `just desktop` starts its own Vite, so do not run it together with `just dev` or `just dev-ui`: both want port 1420.
 
@@ -287,7 +289,9 @@ The full tree, with what each module will contain, is in [docs/architecture.md](
 
 | Symptom | Fix |
 |---|---|
-| `Port 1420 is already in use` when running `just desktop` | `just dev` or `just dev-ui` is already running Vite. Stop it; `just desktop` starts its own. |
+| `Port 1420 is already in use` when running `just desktop` | `just dev`, `just dev-ui` or `just dev-lan` is already running Vite. Stop it; `just desktop` starts its own. |
+| The phone cannot open `https://<IP>:1420` | Same Wi-Fi (not a guest network that isolates devices)? On Fedora Workstation the firewall allows ports above 1024; elsewhere, open TCP 1420. Then accept the certificate warning once. |
+| No sound from the tutor on an iPhone | The silent switch mutes web audio: turn it off. |
 | The app says **API unreachable** | Start the backend: `just dev-api` (local) or `just up` (Docker). Check `curl http://localhost:8080/healthz`. |
 | Rust build fails with `webkit2gtk-4.1` / `javascriptcoregtk` not found | The Tauri system libraries are missing: see [Install the toolchain](#install-the-toolchain). |
 | `pnpm.ps1 cannot be loaded because running scripts is disabled` (Windows, outside `just`) | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. The `justfile` already bypasses it for its own recipes. |

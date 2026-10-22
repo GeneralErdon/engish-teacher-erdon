@@ -311,6 +311,6 @@ describe('Appearance and backend settings', () => {
   it('shows where the backend is', async () => {
     await openSettings()
 
-    expect(screen.getByText('http://localhost:8080')).toBeInTheDocument()
+    expect(screen.getByText(window.location.origin)).toBeInTheDocument()
   })
 })

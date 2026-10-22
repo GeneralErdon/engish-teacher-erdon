@@ -10,7 +10,7 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 |---|---|---|---|
 | `VT_PROFILE` | `cpu \| nvidia \| amd \| external` | `cpu` | Docker Compose profile used by `just up` / `just dev`; selects defaults shown in the UI |
 | `VT_HOST` / `VT_PORT` | str / int | `127.0.0.1` / `8080` | Bind address of `vt-api`. The Docker image sets `0.0.0.0:8080` and compose publishes it on `127.0.0.1:8080`; change the `ports:` mapping in `compose.yaml` rather than these |
-| `VT_CORS_ORIGINS` | JSON list of origins | desktop app + Vite dev server | Origins allowed to call the api cross-origin: `tauri://localhost` (Linux/macOS app), `http://tauri.localhost` (Windows app), `http://localhost:1420` (dev). The browser UI is same-origin and needs nothing |
+| `VT_CORS_ORIGINS` | JSON list of origins | desktop app + Vite dev server | Origins allowed to call the api cross-origin: `tauri://localhost` (Linux/macOS app), `http://tauri.localhost` (Windows app), `http://localhost:1420` (dev, for tools that call the api directly: the dev UI goes through Vite's proxy). The browser UI is same-origin and needs nothing |
 | `VT_UI_DIR` | existing directory | unset | Built UI to serve at `/` (browser / home-lab mode). The Docker image sets `/app/ui` |
 | `VT_LOG_LEVEL` | `DEBUG \| INFO \| WARNING \| ERROR \| CRITICAL` | `INFO` | Logging level |
 | `VT_LLM_PROVIDER` | `ollama \| ollama_cloud \| openai \| anthropic \| gemini \| openai_compatible \| anthropic_compatible` | `openai_compatible` | How to talk to `VT_LLM_BASE_URL` ([chat model providers](#chat-model-providers)) |

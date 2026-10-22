@@ -5,25 +5,23 @@ import { type BackendContext, backendUrl, resolveBackendUrl } from './platform'
 
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: vi.fn(() => false) }))
 
-const browserBuild: BackendContext = {
+const browser: BackendContext = {
   configured: undefined,
   inTauri: false,
-  dev: false,
   origin: 'https://tutor.home.lan',
 }
 
 describe('resolveBackendUrl', () => {
-  it('uses its own origin when the api serves the UI', () => {
-    expect(resolveBackendUrl(browserBuild)).toBe('https://tutor.home.lan')
+  it("uses the page's origin in a browser: the api or the dev server's proxy serves it", () => {
+    expect(resolveBackendUrl(browser)).toBe('https://tutor.home.lan')
   })
 
-  it('talks to the local api from the desktop app and the dev server', () => {
-    expect(resolveBackendUrl({ ...browserBuild, inTauri: true })).toBe('http://localhost:8080')
-    expect(resolveBackendUrl({ ...browserBuild, dev: true })).toBe('http://localhost:8080')
+  it('talks to the local api from the desktop app', () => {
+    expect(resolveBackendUrl({ ...browser, inTauri: true })).toBe('http://localhost:8080')
   })
 
   it('lets VITE_BACKEND_URL override everything, without a trailing slash', () => {
-    const ctx = { ...browserBuild, inTauri: true, configured: 'http://192.168.1.10:8080/' }
+    const ctx = { ...browser, inTauri: true, configured: 'http://192.168.1.10:8080/' }
 
     expect(resolveBackendUrl(ctx)).toBe('http://192.168.1.10:8080')
   })
@@ -37,15 +35,12 @@ describe('backendUrl', () => {
   })
 
   it('uses the local api inside the desktop app', () => {
-    vi.stubEnv('DEV', false)
     vi.mocked(isTauri).mockReturnValueOnce(true)
 
     expect(backendUrl()).toBe('http://localhost:8080')
   })
 
-  it("uses the page's origin in the browser build", () => {
-    vi.stubEnv('DEV', false)
-
+  it("uses the page's origin in a browser", () => {
     expect(backendUrl()).toBe(window.location.origin)
   })
 })
