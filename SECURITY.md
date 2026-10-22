@@ -12,6 +12,10 @@ Include what you found, how to reproduce it and the impact you expect. You will 
 
 Until the first release (`v1.0.0`), only the latest commit on `master` receives security fixes.
 
+## Data at rest
+
+Settings saved from the app, API keys included, live in an encrypted SQLite database (SQLCipher), and each API key is sealed again with AES-256-GCM. The master key is never stored in the database: it lives in the OS keyring, in `VT_SECRET_KEY`, or in a `0600` key file where there is no keyring. Details: [docs/configuration.md#encryption](docs/configuration.md#encryption).
+
 ## What is already checked automatically
 
 Every pull request and a weekly schedule run `uv audit` and `pnpm audit` (Python and JavaScript dependencies), Trivy (Rust dependencies, secrets, Dockerfiles), CodeQL (Python, TypeScript, Rust, GitHub Actions) and GitHub's dependency review; `gitleaks` blocks secrets at commit time. Details: [.github/README.md](.github/README.md).

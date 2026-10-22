@@ -222,7 +222,7 @@ All settings live in `.env`, starting from [`.env.example`](.env.example). They 
 | `VT_LLM_PROVIDER` | `openai_compatible` | `ollama`, `ollama_cloud`, `openai`, `anthropic`, `gemini`, `openai_compatible` or `anthropic_compatible`. Easier: pick it in the app under **Settings → Language model**, which wins over these variables ([details](docs/configuration.md#chat-model-providers)). |
 | `VT_LLM_BASE_URL` | `http://llm:8080/v1` | The provider's base URL. |
 | `VT_LLM_MODEL` | `gemma-3-4b-it-q4` | Model name as the endpoint expects it (`gemma-3-12b-it-q4` on a 12–16 GB GPU). |
-| `VT_LLM_API_KEY` | *(empty)* | For providers that need one. Keys saved in the app stay in the backend (`data/settings.json`, mode `0600`). |
+| `VT_LLM_API_KEY` | *(empty)* | For providers that need one. Keys saved in the app stay in the backend, [encrypted](docs/configuration.md#encryption) (SQLCipher + AES-256-GCM, master key in the OS keyring). |
 | `VT_LLM_HF_REPO` | `ggml-org/gemma-3-4b-it-GGUF` | GGUF that llama.cpp downloads (`cpu` / `amd` profiles). |
 | `VT_STT_BASE_URL` | `http://stt:8000/v1` | Speech-to-text endpoint. |
 | `VT_STT_MODEL` | `Systran/faster-distil-whisper-small.en` | Speaches model id, downloaded once ([voice setup](docs/configuration.md#voice-setup)). |

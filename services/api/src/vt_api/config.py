@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     ui_dir: DirectoryPath | None = None
     log_level: LogLevel = "INFO"
 
-    # Chat model. These apply until a provider is saved from the UI (`settings_path`).
+    # Chat model. These apply until a provider is saved from the UI (in the database).
     llm_provider: ProviderKind = "openai_compatible"
     llm_base_url: HttpUrl = HttpUrl("http://llm:8080/v1")
     llm_model: str = "gemma-3-4b-it-q4"
@@ -79,9 +79,15 @@ class Settings(BaseSettings):
 
     # Storage and privacy
     notes_dir: Path = Path("/data/notes")
-    db_path: Path = Path("/data/progress.db")
-    # Settings saved from the UI, API keys included (file mode 0600).
-    settings_path: Path = Path("/data/settings.json")
-    # Learner profile saved from the UI (level, explanation language).
-    learner_profile_path: Path = Path("/data/learner.json")
+    # Settings saved from the UI, API keys included: SQLite encrypted with SQLCipher (file mode
+    # 0600). Only SQLite for now. Three slashes and a relative path, or four and an absolute one.
+    database_url: str = Field(
+        default="sqlite:////data/voice-tutor.db", pattern=r"^sqlite:///[^?]+$"
+    )
+    # Master key of the database (base64, 32 bytes). Unset: the key file below if it exists,
+    # else the OS keyring (desktop), else a new key file. See docs/configuration.md#encryption.
+    secret_key: SecretStr | None = None
+    secret_key_file: Path = Path("/data/secret.key")
+    # Keep the key in the OS keyring when there is one. Off: always the key file.
+    keyring: bool = True
     keep_audio: bool = False

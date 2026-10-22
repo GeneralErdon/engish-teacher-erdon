@@ -2,7 +2,6 @@
 HTTP transport (OpenAI-compatible servers answering with SSE streams, JSON and raw PCM)."""
 
 import json
-from pathlib import Path
 
 import httpx2
 import openai
@@ -13,9 +12,10 @@ from starlette.testclient import WebSocketTestSession
 from starlette.websockets import WebSocketDisconnect
 
 from vt_api.adapters.chat_factory import SdkChatModelFactory
-from vt_api.adapters.json_llm_config import JsonLlmConfigRepository
 from vt_api.adapters.openai_stt import OpenAISpeechToText
 from vt_api.adapters.openai_tts import OpenAITextToSpeech
+from vt_api.adapters.sql.database import Database
+from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.domain.llm import environment_config
@@ -69,7 +69,7 @@ def _provider(request: httpx2.Request) -> httpx2.Response:
 
 
 @pytest.fixture
-def client(tmp_path: Path, learner_service: LearnerService) -> TestClient:
+def client(database: Database, learner_service: LearnerService) -> TestClient:
     transport = httpx2.MockTransport(_provider)
     chat_models = SdkChatModelFactory(
         openai_http=httpx2.AsyncClient(transport=transport),
@@ -80,7 +80,7 @@ def client(tmp_path: Path, learner_service: LearnerService) -> TestClient:
         kind="openai_compatible", base_url="http://llm/v1", model="m", api_key=SecretStr("")
     )
     llm = LlmService(
-        repository=JsonLlmConfigRepository(tmp_path / "settings.json"),
+        repository=SqlLlmConfigRepository(database),
         chat_models=chat_models,
         environment=environment,
     )

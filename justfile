@@ -123,12 +123,11 @@ models:
     docker compose --profile {{ PROFILE }} up -d --build --wait --scale api=0
 
 # api on :8080 with auto-reload, using the model services published on localhost
-[env("VT_DB_PATH", "data/progress.db")]
+[env("VT_DATABASE_URL", "sqlite:///data/voice-tutor.db")]
 [env("VT_LLM_BASE_URL", LLM_DEV_URL)]
 [env("VT_NOTES_DIR", "data/notes")]
 [env("VT_PRON_BASE_URL", "http://localhost:8001")]
-[env("VT_LEARNER_PROFILE_PATH", "data/learner.json")]
-[env("VT_SETTINGS_PATH", "data/settings.json")]
+[env("VT_SECRET_KEY_FILE", "data/secret.key")]
 [env("VT_STT_BASE_URL", "http://localhost:8000/v1")]
 [env("VT_TTS_BASE_URL", "http://localhost:8000/v1")]
 [group('dev')]

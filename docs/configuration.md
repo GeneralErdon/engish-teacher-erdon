@@ -32,12 +32,31 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_LEARNER_LEVEL` | `A1…C2` | `B1` | Starting level. Changeable in the app (**Settings → Learning**), which wins |
 | `VT_LEARNER_EXPLANATIONS` | `english \| native` | `native` | Language of correction explanations: English, or `VT_LEARNER_L1`. Changeable in the app |
 | `VT_NOTES_DIR` | path | `/data/notes` | Markdown notes output |
-| `VT_DB_PATH` | path | `/data/progress.db` | SQLite database |
-| `VT_SETTINGS_PATH` | path | `/data/settings.json` | Settings saved from the UI, API keys included. Written with mode `0600` |
-| `VT_LEARNER_PROFILE_PATH` | path | `/data/learner.json` | Level and explanation language saved from the UI |
+| `VT_DATABASE_URL` | `sqlite:///` URL | `sqlite:////data/voice-tutor.db` | Settings saved from the UI (providers, API keys, learner profile), [encrypted](#encryption). Four slashes for an absolute path, three for a relative one. Only SQLite for now |
+| `VT_SECRET_KEY` | base64, 32 bytes | *(unset)* | Master key of the database. Unset: the key file, else the OS keyring, else a new key file ([encryption](#encryption)) |
+| `VT_SECRET_KEY_FILE` | path | `/data/secret.key` | Where the key lives when there is no keyring (Docker), mode `0600` |
+| `VT_KEYRING` | bool | `true` | Keep the key in the OS keyring when there is one |
 | `VT_KEEP_AUDIO` | bool | `false` | Keep raw audio for debugging |
 
-`just dev-api` runs the api on your machine, so it overrides the model URLs with the ports Compose publishes on `127.0.0.1` (stt and tts `8000`, llm `8081`, pron `8001`) and stores data in `./data`.
+`just dev-api` runs the api on your machine, so it overrides the model URLs with the ports Compose publishes on `127.0.0.1` (stt and tts `8000`, llm `8081`, pron `8001`) and stores data in `./data` (`data/voice-tutor.db`, `data/secret.key` when there is no keyring).
+
+### Encryption
+
+Everything saved from the app lives in one SQLite database, and nothing in it is readable without the master key:
+
+- **The whole file** is encrypted by [SQLCipher](https://www.zetetic.net/sqlcipher/) (AES-256 on every page, with an HMAC that detects tampering), through the self-contained `sqlcipher3` wheels: no system library to install. Without the key the file is noise, down to its header. It is created with mode `0600`, and deleted rows are overwritten (`secure_delete`).
+- **Each API key** is also sealed in its column with AES-256-GCM, bound to its provider and URL: copied to another row, it no longer decrypts. This layer does not depend on the engine, so keys stay encrypted when Postgres is supported.
+- Both keys are derived from one **master key** (HKDF-SHA256, a separate key per purpose). It is never stored in the database. The api looks for it in this order:
+  1. `VT_SECRET_KEY`: servers, Docker secrets, or one key shared by several installs.
+  2. `VT_SECRET_KEY_FILE`, if the file exists.
+  3. The **OS keyring** (GNOME Keyring or KWallet, Windows Credential Manager, macOS Keychain), as `voice-tutor` / `master-key`. Created on first start: on a desktop the key never touches the disk in the clear.
+  4. A new `VT_SECRET_KEY_FILE` (mode `0600`, never overwritten): containers have no keyring.
+
+The api logs where the key came from, never the key. With the wrong key, it refuses to start and says which key it tried.
+
+**Back up the key.** Without it the saved settings are lost: the fix is to move `voice-tutor.db` away and enter the API keys again. To read the key from the GNOME keyring: `secret-tool lookup service voice-tutor username master-key`.
+
+**One `./data` for Docker and `just dev-api`?** Docker has no keyring, so it would create its own key file. Put one key in `.env` for both: `VT_SECRET_KEY=$(uv run python -c "from vt_api.adapters.secret_key import generate; print(generate())")`.
 
 ### Voice setup
 
@@ -74,10 +93,10 @@ Pick the chat model in the app under **Settings → Language model**, or with th
 | `anthropic_compatible` | yours, without `/v1` | if the server asks | Any server that speaks the Anthropic Messages API |
 
 How the keys are handled:
-- They go from the UI to the api once, are stored in `VT_SETTINGS_PATH` (mode `0600`, `./data` is gitignored) and never come back: the UI only learns *whether* a key is saved and its last four characters.
+- They go from the UI to the api once, are stored [encrypted](#encryption) in the database (`./data` is gitignored) and never come back: the UI only learns *whether* a key is saved and its last four characters.
 - A saved key is only sent to the URL it was saved with. Change the URL and you type the key again.
 - The api never falls back to `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or other credentials in its own environment.
-- `DELETE /v1/llm/settings` (**Reset** in the app) deletes the file, keys included.
+- `DELETE /v1/llm/settings` (**Reset** in the app) deletes the saved providers, keys included; their bytes are overwritten in the file.
 
 ## pron (`vt_pron.config.Settings`)
 

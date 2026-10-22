@@ -89,7 +89,9 @@ voice-tutor/
 │   │   │   │   ├── openai_chat.py   # Chat Completions: OpenAI, Gemini, Ollama, llama.cpp, LM Studio...
 │   │   │   │   ├── anthropic_chat.py# Messages API: Anthropic and compatible servers
 │   │   │   │   ├── chat_factory.py  # provider settings → the right chat adapter
-│   │   │   │   ├── json_llm_config.py # provider settings saved from the UI (mode 0600)
+│   │   │   │   ├── secret_key.py    # master key: VT_SECRET_KEY, key file or OS keyring
+│   │   │   │   ├── secret_box.py    # HKDF subkeys + AES-256-GCM for secret columns
+│   │   │   │   ├── sql/             # SQLCipher database (SQLAlchemy), repositories, Alembic migrations
 │   │   │   │   ├── openai_tts.py
 │   │   │   │   ├── pron_http.py
 │   │   │   │   ├── sqlite_progress.py
@@ -175,7 +177,7 @@ voice-tutor/
 ├── scripts/
 │   ├── gen_ts_types.py          # WS event types (OpenAPI does not describe WebSocket messages)
 │   └── render_results.py        # results JSON → README table
-└── data/                        # runtime bind mount (gitignored): notes/, progress.db. Model caches use Docker named volumes
+└── data/                        # runtime bind mount (gitignored): voice-tutor.db (encrypted), notes/. Model caches use Docker named volumes
 ```
 
 ## Realtime protocol (`/ws/session`)
@@ -246,7 +248,8 @@ Tensor shapes are typed with `jaxtyping` and checked at runtime in tests (`beart
 
 ## Persistence
 
-- **SQLite** (`data/progress.db`) for sessions, turns, corrections and phoneme stats. It is a single-user app, so SQLite is the right tool: zero ops and trivially backed up.
+- **SQLite, encrypted** (`data/voice-tutor.db`): today the settings saved from the UI (chat model providers with their API keys, learner profile); later sessions, turns, corrections and phoneme stats. It is a single-user app, so SQLite is the right tool: zero ops and trivially backed up. SQLCipher encrypts the file and API keys are sealed again per column, with a master key kept out of the database, in the OS keyring when there is one ([configuration.md#encryption](configuration.md#encryption)).
+- **SQLAlchemy 2 + Alembic.** Tables in portable SQL and migrations applied at startup, so Postgres can be added as a second engine without touching the repositories. Queries are synchronous and run in worker threads: a few per minute do not need an async driver, and one code path serves both engines.
 - **Markdown notes** (`data/notes/*.md`) with YAML front matter, one per session, plus a generated `progress.md`. They are human-readable, Obsidian-compatible, and rendered in the UI with `react-markdown` + `remark-gfm` + `rehype-sanitize` (sanitised: notes include model output).
 
 ## Distribution
@@ -277,7 +280,7 @@ The same code ships in two forms. Only *who starts the processes* changes: the a
 | 2 | Hand-written FastAPI WebSocket pipeline | Learning goal; full control over cancellation and latency | Pipecat / LiveKit Agents (good options; may be revisited) |
 | 3 | Standard wire protocols, not vendors: OpenAI-compatible everywhere, plus the Anthropic Messages API for chat. Each protocol through its official SDK (`openai`, `anthropic`, both on httpx2) | Two chat adapters cover Ollama (local and cloud), OpenAI, Gemini, llama.cpp, LM Studio, Anthropic and any compatible server; the same OpenAI-compatible approach covers Speaches and Kokoro. The SDKs bring streaming, retries and typed errors | One SDK per vendor; hand-written HTTP clients |
 | 4 | Separate `pron` service | Heavy ML deps (torch) isolated from the API; scalable and testable on its own | Scoring inside `api` |
-| 5 | SQLite + Markdown | Single user, zero ops, human-readable notes | Postgres |
+| 5 | SQLite (encrypted with SQLCipher, API keys sealed again per column) + Markdown | Single user, zero ops, human-readable notes; saved API keys and, later, conversations unreadable without the master key, which lives in the OS keyring | Postgres (planned as an option for servers), plain JSON files |
 | 6 | uv workspace monorepo (+ pnpm workspace for the UI) | One lockfile per ecosystem, shared tooling, fast installs | Poetry / separate repos |
 | 7 | `just` as the task runner | Runs natively on Windows (PowerShell) as well as Linux/macOS; installs without admin rights (`uv tool install rust-just`) | Make (no native Windows), npm scripts (Node-only) |
 | 8 | Two distributions of one codebase: Docker Compose (server) and, from Phase 4, a desktop installer that runs the backend as Tauri sidecars ([Distribution](#distribution)) | One-click install for learners; Docker keeps hardware profiles and the home-lab case; Vulkan builds cover every GPU vendor without per-vendor images; native Metal on macOS | Desktop-only bundle (loses the home-lab case), Docker-only (too hard for learners), the app driving `docker compose` (still needs Docker) |

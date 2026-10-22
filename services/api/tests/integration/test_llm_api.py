@@ -3,7 +3,6 @@ transport (`httpx2.MockTransport`)."""
 
 import json
 from collections.abc import AsyncIterator
-from pathlib import Path
 from unittest.mock import create_autospec
 
 import httpx2
@@ -12,9 +11,10 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from vt_api.adapters.chat_factory import SdkChatModelFactory
-from vt_api.adapters.json_llm_config import JsonLlmConfigRepository
 from vt_api.adapters.openai_stt import OpenAISpeechToText
 from vt_api.adapters.openai_tts import OpenAITextToSpeech
+from vt_api.adapters.sql.database import Database
+from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.domain.llm import environment_config
@@ -62,7 +62,7 @@ def chat_models() -> SdkChatModelFactory:
 
 @pytest.fixture
 def container(
-    tmp_path: Path, chat_models: SdkChatModelFactory, learner_service: LearnerService
+    database: Database, chat_models: SdkChatModelFactory, learner_service: LearnerService
 ) -> Container:
     environment = environment_config(
         kind="openai_compatible",
@@ -72,7 +72,7 @@ def container(
     )
     return Container(
         llm=LlmService(
-            repository=JsonLlmConfigRepository(tmp_path / "settings.json"),
+            repository=SqlLlmConfigRepository(database),
             chat_models=chat_models,
             environment=environment,
         ),

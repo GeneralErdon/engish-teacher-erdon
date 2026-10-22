@@ -17,6 +17,7 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 - [ ] `vt_contracts` WS protocol + generated TS types
 - [ ] `api`: settings, container, ports, OpenAI-compatible adapters, health checks
 - [x] Chat model providers chosen from the UI: Ollama (local and cloud), OpenAI, Anthropic, Gemini, and any OpenAI- or Anthropic-compatible endpoint. API keys stay in the api and never come back to the UI (2026-10-21)
+- [x] Settings stored encrypted: SQLCipher database (SQLAlchemy + Alembic, ready for a Postgres engine), API keys sealed again with AES-256-GCM, master key in the OS keyring (2026-10-22)
 - [x] UI shell: responsive navigation, Home (welcome + status), Settings, light/dark theme, typed API client generated from the api's OpenAPI schema (2026-10-21)
 - [ ] Desktop: configurable backend URL (for a home-lab server) and a "backend unavailable" screen with the next step to take
 - [x] Text conversation over `/ws/session`: streamed replies, Tandem-style corrections in the learner's chosen language, interruptions, per-turn latency (2026-10-22)

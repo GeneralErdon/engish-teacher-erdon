@@ -1,14 +1,13 @@
-import json
 from collections.abc import AsyncIterator
-from pathlib import Path
 from unittest.mock import create_autospec
 
-import anyio
 import httpx2
 import pytest
+from sqlalchemy import text
 
 from vt_api.adapters.openai_stt import OpenAISpeechToText
 from vt_api.adapters.openai_tts import OpenAITextToSpeech
+from vt_api.adapters.sql.database import Database
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.main import create_app
@@ -40,14 +39,12 @@ async def test_defaults_come_from_the_environment(client: httpx2.AsyncClient) ->
     )
 
 
-async def test_saving_the_profile(client: httpx2.AsyncClient, tmp_path: Path) -> None:
+async def test_saving_the_profile(client: httpx2.AsyncClient) -> None:
     saved = await client.put("/v1/learner", json={"level": "C1", "explanations": "english"})
 
     assert saved.status_code == 200
     view = LearnerProfileView.model_validate_json((await client.get("/v1/learner")).content)
     assert (view.level, view.explanations, view.source) == ("C1", "english", "saved")
-    stored = json.loads(await anyio.Path(tmp_path / "learner.json").read_text())
-    assert stored == {"level": "C1", "explanations": "english"}
 
 
 async def test_rejects_unknown_levels(client: httpx2.AsyncClient) -> None:
@@ -56,10 +53,15 @@ async def test_rejects_unknown_levels(client: httpx2.AsyncClient) -> None:
     assert response.status_code == 422
 
 
-async def test_unreadable_file_falls_back_to_the_environment(
-    client: httpx2.AsyncClient, tmp_path: Path
+async def test_an_unreadable_profile_falls_back_to_the_environment(
+    client: httpx2.AsyncClient, database: Database
 ) -> None:
-    await anyio.Path(tmp_path / "learner.json").write_text("{broken")
+    with database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO learner_profile (id, level, explanations) VALUES (1, 'Z9', 'klingon')"
+            )
+        )
 
     view = LearnerProfileView.model_validate_json((await client.get("/v1/learner")).content)
 
