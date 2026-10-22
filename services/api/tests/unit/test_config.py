@@ -13,6 +13,7 @@ def test_defaults_match_docs() -> None:
     assert settings.llm_api_key.get_secret_value() == ""
     assert settings.llm_provider == "openai_compatible"
     assert str(settings.settings_path) == "/data/settings.json"
+    assert settings.learner_explanations == "native"
 
 
 def test_reads_vt_prefixed_environment(monkeypatch: pytest.MonkeyPatch) -> None:

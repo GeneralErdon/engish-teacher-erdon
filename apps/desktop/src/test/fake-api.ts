@@ -70,6 +70,8 @@ type Reply = Response | (() => Response | Promise<Response>)
 
 interface Overrides {
   health?: Reply
+  learner?: Reply
+  saveLearner?: Reply
   providers?: Reply
   settings?: Reply
   models?: Reply
@@ -80,6 +82,7 @@ interface Overrides {
 
 export interface FakeApi {
   fetch: Mock<(request: Request) => Promise<Response>>
+  learner: Schemas['LearnerProfileView']
   /** Bodies the UI sent, by "METHOD /path". */
   sent: Map<string, unknown[]>
   settings: Settings
@@ -94,6 +97,7 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
     fetch: vi.fn<(request: Request) => Promise<Response>>(),
     sent,
     settings: structuredClone(ENVIRONMENT),
+    learner: { level: 'B1', explanations: 'native', native_language: 'es', source: 'environment' },
   }
 
   const reply = (override: Reply | undefined, fallback: () => Response | Promise<Response>) => {
@@ -113,6 +117,14 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
         return reply(overrides.health, () =>
           json({ status: 'ok', service: 'api', version: '0.1.0' }),
         )
+      case 'GET /v1/learner':
+        return reply(overrides.learner, () => json(api.learner))
+      case 'PUT /v1/learner':
+        return reply(overrides.saveLearner, () => {
+          const body = sent.get(route)?.at(-1) as Schemas['LearnerProfile']
+          api.learner = { ...api.learner, ...body, source: 'saved' }
+          return json(api.learner)
+        })
       case 'GET /v1/llm/providers':
         return reply(overrides.providers, () => json(PROVIDERS))
       case 'GET /v1/llm/settings':

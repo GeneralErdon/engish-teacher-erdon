@@ -8,15 +8,19 @@ import anthropic
 import openai
 
 from vt_api.adapters.chat_factory import SdkChatModelFactory
+from vt_api.adapters.json_learner_profile import JsonLearnerProfileRepository
 from vt_api.adapters.json_llm_config import JsonLlmConfigRepository
 from vt_api.config import Settings
 from vt_api.domain.llm import environment_config
+from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
+from vt_contracts.learner import LearnerProfile
 
 
 @dataclass(frozen=True, slots=True)
 class Container:
     llm: LlmService
+    learner: LearnerService
 
 
 @asynccontextmanager
@@ -39,5 +43,12 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
                 repository=JsonLlmConfigRepository(settings.settings_path),
                 chat_models=chat_models,
                 environment=environment,
-            )
+            ),
+            learner=LearnerService(
+                repository=JsonLearnerProfileRepository(settings.learner_profile_path),
+                environment=LearnerProfile(
+                    level=settings.learner_level, explanations=settings.learner_explanations
+                ),
+                native_language=settings.learner_l1,
+            ),
         )

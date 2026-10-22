@@ -16,6 +16,7 @@ from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.domain.llm import environment_config
 from vt_api.main import create_app
+from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
 from vt_contracts.llm import (
     ConnectionTestResult,
@@ -57,7 +58,9 @@ def chat_models() -> SdkChatModelFactory:
 
 
 @pytest.fixture
-def container(tmp_path: Path, chat_models: SdkChatModelFactory) -> Container:
+def container(
+    tmp_path: Path, chat_models: SdkChatModelFactory, learner_service: LearnerService
+) -> Container:
     environment = environment_config(
         kind="openai_compatible",
         base_url="http://llm:8080/v1",
@@ -69,7 +72,8 @@ def container(tmp_path: Path, chat_models: SdkChatModelFactory) -> Container:
             repository=JsonLlmConfigRepository(tmp_path / "settings.json"),
             chat_models=chat_models,
             environment=environment,
-        )
+        ),
+        learner=learner_service,
     )
 
 

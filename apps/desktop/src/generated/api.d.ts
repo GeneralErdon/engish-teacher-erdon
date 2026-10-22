@@ -24,6 +24,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/learner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Learner */
+        get: operations["get_learner_v1_learner_get"];
+        /** Save Learner */
+        put: operations["save_learner_v1_learner_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/llm/models": {
         parameters: {
             query?: never;
@@ -115,6 +133,8 @@ export interface components {
     schemas: {
         /** @enum {string} */
         ApiKeyPolicy: "required" | "optional";
+        /** @enum {string} */
+        CefrLevel: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
         /**
          * ConnectionTestRequest
          * @description Body of `POST /v1/llm/test`.
@@ -145,6 +165,8 @@ export interface components {
             /** Reply */
             reply?: string | null;
         };
+        /** @enum {string} */
+        ExplanationLanguage: "english" | "native";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -167,6 +189,29 @@ export interface components {
             status: "ok";
             /** Version */
             version: string;
+        };
+        /**
+         * LearnerProfile
+         * @description What the learner can change from the UI. Body of `PUT /v1/learner`.
+         */
+        LearnerProfile: {
+            explanations: components["schemas"]["ExplanationLanguage"];
+            level: components["schemas"]["CefrLevel"];
+        };
+        /**
+         * LearnerProfileView
+         * @description Body of `GET`/`PUT /v1/learner`.
+         */
+        LearnerProfileView: {
+            explanations: components["schemas"]["ExplanationLanguage"];
+            level: components["schemas"]["CefrLevel"];
+            /** Native Language */
+            native_language: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "environment" | "saved";
         };
         /**
          * LlmSettingsView
@@ -308,6 +353,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    get_learner_v1_learner_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LearnerProfileView"];
+                };
+            };
+        };
+    };
+    save_learner_v1_learner_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LearnerProfile"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LearnerProfileView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

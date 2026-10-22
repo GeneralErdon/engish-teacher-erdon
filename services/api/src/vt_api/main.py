@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from vt_api import __version__
 from vt_api.config import Settings
 from vt_api.container import Container, build_container
-from vt_api.http import health, llm
+from vt_api.http import health, learner, llm
 
 
 def create_app(settings: Settings | None = None, container: Container | None = None) -> FastAPI:
@@ -35,6 +35,7 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     )
     app.include_router(health.router)
     app.include_router(llm.router)
+    app.include_router(learner.router)
 
     # Browser / home-lab mode: the same UI the desktop app bundles. Mounted last so API routes win.
     if settings.ui_dir is not None:

@@ -10,11 +10,11 @@ from typing import Literal
 from pydantic import DirectoryPath, Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from vt_contracts.learner import CefrLevel, ExplanationLanguage
 from vt_contracts.llm import ProviderKind
 
 type Profile = Literal["cpu", "nvidia", "amd", "external"]
 type SttBackend = Literal["openai", "whispercpp"]
-type CefrLevel = Literal["A1", "A2", "B1", "B2", "C1", "C2"]
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 DEFAULT_CORS_ORIGINS = (
@@ -71,10 +71,14 @@ class Settings(BaseSettings):
     # Learner
     learner_l1: str = Field(default="es", pattern=r"^[a-z]{2,3}$")
     learner_level: CefrLevel = "B1"
+    # Language of correction explanations: English or the native language above.
+    learner_explanations: ExplanationLanguage = "native"
 
     # Storage and privacy
     notes_dir: Path = Path("/data/notes")
     db_path: Path = Path("/data/progress.db")
     # Settings saved from the UI, API keys included (file mode 0600).
     settings_path: Path = Path("/data/settings.json")
+    # Learner profile saved from the UI (level, explanation language).
+    learner_profile_path: Path = Path("/data/learner.json")
     keep_audio: bool = False
