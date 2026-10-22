@@ -20,7 +20,7 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_LLM_TEMPERATURE` | float 0–2 | `0.6` | Teacher creativity |
 | `VT_STT_BACKEND` | `openai \| whispercpp` | `openai` | Selects STT adapter |
 | `VT_STT_BASE_URL` | URL | `http://stt:8000/v1` | STT endpoint |
-| `VT_STT_MODEL` | str | `Systran/faster-distil-whisper-small.en` | Speaches model id. Downloaded once ([voice setup](#voice-setup)); on a GPU, `Systran/faster-whisper-large-v3-turbo` |
+| `VT_STT_MODEL` | str | `Systran/faster-distil-whisper-small.en` | Speaches model id, downloaded on Speaches' first start ([voice setup](#voice-setup)); on a GPU, `Systran/faster-whisper-large-v3-turbo` |
 | `VT_TTS_BASE_URL` | URL | `http://tts:8000/v1` | TTS endpoint: the same Speaches as STT. Any server with an OpenAI-compatible `/audio/speech` that streams raw PCM at 24 kHz works, e.g. Kokoro-FastAPI on port `8880` |
 | `VT_TTS_MODEL` | str | `speaches-ai/Kokoro-82M-v1.0-ONNX` | Kokoro on ONNX Runtime, downloaded once ([voice setup](#voice-setup)). Lighter (~120 MB): `speaches-ai/Kokoro-82M-v1.0-ONNX-int8`. Kokoro-FastAPI: `kokoro` |
 | `VT_TTS_VOICE` | str | `af_heart` | Tutor voice: American (`af_*`, `am_*`) or British (`bf_*`, `bm_*`) English, e.g. `am_michael`, `bf_emma` |
@@ -60,16 +60,19 @@ The api logs where the key came from, never the key. With the wrong key, it refu
 
 ### Voice setup
 
-Both directions of speech run on your machine in one [Speaches](https://speaches.ai) server, so your voice never leaves it: faster-whisper turns what you say into text, and [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) (82M parameters, on ONNX Runtime) gives the tutor its voice. Once:
+Both directions of speech run on your machine in one [Speaches](https://speaches.ai) server, so your voice never leaves it: faster-whisper turns what you say into text, and [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) (82M parameters, on ONNX Runtime) gives the tutor its voice. One command:
 
 ```bash
-docker compose --profile cpu up -d stt-cpu        # start Speaches (published on 127.0.0.1:8000)
-export SPEACHES_BASE_URL=http://localhost:8000
-uvx speaches-cli model download Systran/faster-distil-whisper-small.en   # speech recognition, ~340 MB
-uvx speaches-cli model download speaches-ai/Kokoro-82M-v1.0-ONNX         # the tutor's voice, ~355 MB
+just voice        # = docker compose --profile cpu up -d --wait stt-cpu
 ```
 
-**Settings → Voice** in the app checks each part (`GET /v1/speech/status`) and shows the commands for whatever is missing.
+It starts Speaches on `127.0.0.1:8000` and returns once it is healthy. Compose passes `VT_STT_MODEL` and `VT_TTS_MODEL` to Speaches as `PRELOAD_MODELS`, so the first start downloads both (~340 MB for speech recognition, ~355 MB for the voice) into the `stt-models` volume; later starts find them there. Change either model in `.env` and run `just voice` again: Compose recreates the container and Speaches fetches the new one. Follow a download with `docker compose logs -f stt-cpu`.
+
+On a Speaches you run yourself, download a model with `SPEACHES_BASE_URL=http://localhost:8000 uvx speaches-cli model download <model id>`.
+
+**Settings → Voice** in the app checks each part (`GET /v1/speech/status`) and says what to run.
+
+To try everything on your phone with a cloud chat model, `just dev-phone` runs `voice`, then `dev-api` and `dev-lan` together.
 
 How a spoken turn travels:
 - **You speak.** Press the microphone in **Practice**: the UI streams PCM16 at 16 kHz over `/ws/session` while you speak and sends `input.commit` when you press it again; the api wraps the audio as WAV and calls `POST {VT_STT_BASE_URL}/audio/transcriptions` with `language=en`.
