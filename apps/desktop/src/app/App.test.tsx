@@ -17,7 +17,10 @@ describe('Home', () => {
     expect(await screen.findByText('OpenAI-compatible')).toBeInTheDocument()
     expect(screen.getByText('gemma-3-4b-it-q4')).toBeInTheDocument()
     expect(screen.getByText('From .env')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /start a conversation/i })).toBeDisabled()
+    expect(screen.getByRole('link', { name: /start a conversation/i })).toHaveAttribute(
+      'href',
+      '/practice',
+    )
     expect(screen.getAllByRole('status')[0]).toHaveTextContent('API online · v0.1.0')
   })
 
@@ -94,7 +97,7 @@ describe('Navigation', () => {
 
     const tabs = (await screen.findAllByRole('navigation', { name: 'Main' }))[1]
     expect(tabs).toBeDefined()
-    expect(within(tabs as HTMLElement).getAllByRole('link')).toHaveLength(2)
+    expect(within(tabs as HTMLElement).getAllByRole('link')).toHaveLength(3)
   })
 
   it('says so when a page does not exist', async () => {

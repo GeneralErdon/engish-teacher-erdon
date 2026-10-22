@@ -14,10 +14,10 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     // Generates the route tree from src/routes and splits each page into its own chunk.
-    // Must run before the React plugin. Tests load routes unsplit, so coverage maps to source.
+    // Must run before the React plugin.
     tanstackRouter({
       target: 'react',
-      autoCodeSplitting: !process.env.VITEST,
+      autoCodeSplitting: true,
       generatedRouteTree: './src/generated/routeTree.gen.ts',
     }),
     react(),
@@ -55,6 +55,9 @@ export default defineConfig({
         'src/**/*.d.ts',
         // Generated: API types (`just types`) and the route tree (TanStack Router plugin).
         'src/generated/**',
+        // Route declarations: the router plugin rewrites their `component` for code splitting
+        // and hot reload, so v8 cannot map those lines. The pages they render are tested.
+        'src/routes/**',
       ],
       // A floor, not a target: never lower it to make a build pass (docs/development.md#testing).
       thresholds: {

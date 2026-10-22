@@ -1,0 +1,146 @@
+"""`/ws/session` end to end: real session, service and adapters; the provider is faked at the
+HTTP transport (an OpenAI-compatible server answering with SSE streams)."""
+
+import json
+from pathlib import Path
+
+import httpx2
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
+from starlette.testclient import WebSocketTestSession
+from starlette.websockets import WebSocketDisconnect
+
+from vt_api.adapters.chat_factory import SdkChatModelFactory
+from vt_api.adapters.json_llm_config import JsonLlmConfigRepository
+from vt_api.config import Settings
+from vt_api.container import Container
+from vt_api.domain.llm import environment_config
+from vt_api.main import create_app
+from vt_api.services.learner import LearnerService
+from vt_api.services.llm import LlmService
+from vt_contracts.ws import SERVER_EVENT, ServerEvent
+
+CORRECTION = {
+    "corrected": "I went to the beach",
+    "items": [
+        {
+            "original": "have went",
+            "suggestion": "went",
+            "kind": "grammar",
+            "explanation": "Pasado simple.",
+        }
+    ],
+}
+
+
+def _sse(*texts: str) -> httpx2.Response:
+    chunks = [
+        {
+            "id": "c",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "m",
+            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+        }
+        for text in texts
+    ]
+    body = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+    return httpx2.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+
+def _provider(request: httpx2.Request) -> httpx2.Response:
+    system = json.loads(request.content)["messages"][0]["content"]
+    if "corrections as JSON" in system:
+        return _sse(json.dumps(CORRECTION))
+    return _sse("Nice", "! What did you do?")
+
+
+@pytest.fixture
+def client(tmp_path: Path, learner_service: LearnerService) -> TestClient:
+    transport = httpx2.MockTransport(_provider)
+    chat_models = SdkChatModelFactory(
+        openai_http=httpx2.AsyncClient(transport=transport),
+        anthropic_http=httpx2.AsyncClient(transport=transport),
+        max_retries=0,
+    )
+    environment = environment_config(
+        kind="openai_compatible", base_url="http://llm/v1", model="m", api_key=SecretStr("")
+    )
+    llm = LlmService(
+        repository=JsonLlmConfigRepository(tmp_path / "settings.json"),
+        chat_models=chat_models,
+        environment=environment,
+    )
+    app = create_app(
+        Settings(_env_file=None), container=Container(llm=llm, learner=learner_service)
+    )
+    return TestClient(app)
+
+
+def _receive(ws: WebSocketTestSession, count: int) -> list[ServerEvent]:
+    return [SERVER_EVENT.validate_json(ws.receive_text()) for _ in range(count)]
+
+
+def test_a_conversation_over_the_socket(client: TestClient) -> None:
+    with client.websocket_connect("/ws/session", headers={"origin": "tauri://localhost"}) as ws:
+        ws.send_text(json.dumps({"type": "session.start", "v": 1}))
+        [ready] = _receive(ws, 1)
+        ws.send_text(json.dumps({"type": "input.text", "v": 1, "text": "I have went to the beach"}))
+        # transcript, 2 deltas, done, metrics, correction: order between the last ones varies.
+        events = _receive(ws, 6)
+        ws.send_text(json.dumps({"type": "session.end", "v": 1}))
+
+    assert ready.type == "session.ready"
+    kinds = [event.type for event in events]
+    assert kinds[0] == "transcript.final"
+    assert sorted(kinds[1:]) == sorted(
+        ["assistant.text.delta"] * 2 + ["assistant.text.done", "turn.metrics", "correction"]
+    )
+    correction = next(event for event in events if event.type == "correction")
+    assert correction.model_dump()["corrected"] == "I went to the beach"
+
+
+def test_invalid_events_get_an_error_and_the_session_goes_on(client: TestClient) -> None:
+    with client.websocket_connect("/ws/session") as ws:
+        ws.send_text('{"type": "dance", "v": 1}')
+        [error] = _receive(ws, 1)
+        ws.send_text(json.dumps({"type": "input.text", "v": 1, "text": "Hi"}))
+        [not_started] = _receive(ws, 1)
+
+    assert error.model_dump()["code"] == "bad_event"
+    assert not_started.model_dump()["code"] == "not_started"
+
+
+@pytest.mark.parametrize("origin", ["https://evil.example", "http://localhost:9999"])
+def test_other_websites_cannot_connect(client: TestClient, origin: str) -> None:
+    with (
+        pytest.raises(WebSocketDisconnect) as closed,
+        client.websocket_connect("/ws/session", headers={"origin": origin}) as ws,
+    ):
+        ws.receive_text()
+
+    assert closed.value.code == 1008
+
+
+def test_the_page_the_api_serves_may_connect(client: TestClient) -> None:
+    # The test client's Host header is "testserver".
+    with client.websocket_connect("/ws/session", headers={"origin": "http://testserver"}) as ws:
+        ws.send_text(json.dumps({"type": "session.start", "v": 1}))
+        [ready] = _receive(ws, 1)
+
+    assert ready.type == "session.ready"
+
+
+def test_the_schema_describes_the_socket_events(client: TestClient) -> None:
+    schema = client.get("/openapi.json").json()
+
+    events = schema["components"]["schemas"]
+    assert set(events["ClientEvent"]["discriminator"]["mapping"]) == {
+        "session.start",
+        "input.text",
+        "input.interrupt",
+        "session.end",
+    }
+    assert "correction" in events["ServerEvent"]["discriminator"]["mapping"]
+    assert client.get("/openapi.json").json() == schema  # built once, then cached

@@ -8,6 +8,78 @@
         ],
         "type": "string"
       },
+      "AssistantTextDelta": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "assistant.text.delta",
+            "default": "assistant.text.delta",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "text"
+        ],
+        "title": "AssistantTextDelta",
+        "type": "object"
+      },
+      "AssistantTextDone": {
+        "additionalProperties": false,
+        "properties": {
+          "interrupted": {
+            "default": false,
+            "title": "Interrupted",
+            "type": "boolean"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "assistant.text.done",
+            "default": "assistant.text.done",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "text",
+          "interrupted"
+        ],
+        "title": "AssistantTextDone",
+        "type": "object"
+      },
       "CefrLevel": {
         "enum": [
           "A1",
@@ -18,6 +90,31 @@
           "C2"
         ],
         "type": "string"
+      },
+      "ClientEvent": {
+        "discriminator": {
+          "mapping": {
+            "input.interrupt": "#/components/schemas/InputInterrupt",
+            "input.text": "#/components/schemas/InputText",
+            "session.end": "#/components/schemas/SessionEnd",
+            "session.start": "#/components/schemas/SessionStart"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SessionStart"
+          },
+          {
+            "$ref": "#/components/schemas/InputText"
+          },
+          {
+            "$ref": "#/components/schemas/InputInterrupt"
+          },
+          {
+            "$ref": "#/components/schemas/SessionEnd"
+          }
+        ]
       },
       "ConnectionTestRequest": {
         "additionalProperties": false,
@@ -109,6 +206,136 @@
         "title": "ConnectionTestResult",
         "type": "object"
       },
+      "Correction": {
+        "additionalProperties": false,
+        "description": "Feedback on the learner's message. `corrected == text` and no items: nothing to fix.",
+        "properties": {
+          "corrected": {
+            "title": "Corrected",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CorrectionItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "correction",
+            "default": "correction",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "corrected",
+          "items",
+          "latency_ms"
+        ],
+        "title": "Correction",
+        "type": "object"
+      },
+      "CorrectionItem": {
+        "additionalProperties": false,
+        "properties": {
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CorrectionKind"
+          },
+          "original": {
+            "title": "Original",
+            "type": "string"
+          },
+          "suggestion": {
+            "title": "Suggestion",
+            "type": "string"
+          }
+        },
+        "required": [
+          "original",
+          "suggestion",
+          "kind",
+          "explanation"
+        ],
+        "title": "CorrectionItem",
+        "type": "object"
+      },
+      "CorrectionKind": {
+        "enum": [
+          "grammar",
+          "vocabulary",
+          "spelling",
+          "naturalness"
+        ],
+        "type": "string"
+      },
+      "ErrorCode": {
+        "enum": [
+          "bad_event",
+          "not_started",
+          "llm_failed",
+          "internal"
+        ],
+        "type": "string"
+      },
+      "ErrorEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "type": {
+            "const": "error",
+            "default": "error",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "code",
+          "message",
+          "retryable"
+        ],
+        "title": "ErrorEvent",
+        "type": "object"
+      },
       "ExplanationLanguage": {
         "enum": [
           "english",
@@ -157,6 +384,61 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "InputInterrupt": {
+        "additionalProperties": false,
+        "description": "Stop the tutor's current reply (the learner started a new turn or pressed stop).",
+        "properties": {
+          "type": {
+            "const": "input.interrupt",
+            "default": "input.interrupt",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type"
+        ],
+        "title": "InputInterrupt",
+        "type": "object"
+      },
+      "InputText": {
+        "additionalProperties": false,
+        "description": "A typed message from the learner.",
+        "properties": {
+          "text": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "input.text",
+            "default": "input.text",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "text"
+        ],
+        "title": "InputText",
         "type": "object"
       },
       "LearnerProfile": {
@@ -459,6 +741,230 @@
           "api_key_hint"
         ],
         "title": "ProviderSettingsView",
+        "type": "object"
+      },
+      "ServerEvent": {
+        "discriminator": {
+          "mapping": {
+            "assistant.text.delta": "#/components/schemas/AssistantTextDelta",
+            "assistant.text.done": "#/components/schemas/AssistantTextDone",
+            "correction": "#/components/schemas/Correction",
+            "error": "#/components/schemas/ErrorEvent",
+            "session.ready": "#/components/schemas/SessionReady",
+            "transcript.final": "#/components/schemas/TranscriptFinal",
+            "turn.metrics": "#/components/schemas/TurnMetrics"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SessionReady"
+          },
+          {
+            "$ref": "#/components/schemas/TranscriptFinal"
+          },
+          {
+            "$ref": "#/components/schemas/AssistantTextDelta"
+          },
+          {
+            "$ref": "#/components/schemas/AssistantTextDone"
+          },
+          {
+            "$ref": "#/components/schemas/Correction"
+          },
+          {
+            "$ref": "#/components/schemas/TurnMetrics"
+          },
+          {
+            "$ref": "#/components/schemas/ErrorEvent"
+          }
+        ]
+      },
+      "SessionEnd": {
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "session.end",
+            "default": "session.end",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type"
+        ],
+        "title": "SessionEnd",
+        "type": "object"
+      },
+      "SessionReady": {
+        "additionalProperties": false,
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/CefrLevel"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "type": {
+            "const": "session.ready",
+            "default": "session.ready",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "level",
+          "provider",
+          "model"
+        ],
+        "title": "SessionReady",
+        "type": "object"
+      },
+      "SessionStart": {
+        "additionalProperties": false,
+        "description": "Begin a conversation. Level and explanation language come from the learner profile.",
+        "properties": {
+          "topic": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Topic"
+          },
+          "type": {
+            "const": "session.start",
+            "default": "session.start",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "topic"
+        ],
+        "title": "SessionStart",
+        "type": "object"
+      },
+      "TranscriptFinal": {
+        "additionalProperties": false,
+        "description": "What the learner said (or typed) in this turn, as the server will use it.",
+        "properties": {
+          "source": {
+            "enum": [
+              "text",
+              "voice"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "transcript.final",
+            "default": "transcript.final",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "text",
+          "source"
+        ],
+        "title": "TranscriptFinal",
+        "type": "object"
+      },
+      "TurnMetrics": {
+        "additionalProperties": false,
+        "description": "Latency of the tutor's reply, in milliseconds, from the learner's message (Phase 0).",
+        "properties": {
+          "first_token_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Token Ms"
+          },
+          "reply_ms": {
+            "title": "Reply Ms",
+            "type": "integer"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "turn.metrics",
+            "default": "turn.metrics",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "first_token_ms",
+          "reply_ms"
+        ],
+        "title": "TurnMetrics",
         "type": "object"
       },
       "ValidationError": {

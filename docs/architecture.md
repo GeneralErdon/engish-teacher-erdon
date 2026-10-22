@@ -95,12 +95,12 @@ voice-tutor/
 │   │   │   │   └── markdown_notes.py
 │   │   │   ├── realtime/
 │   │   │   │   ├── protocol.py  # (de)serialisation of WS frames using vt_contracts
-│   │   │   │   ├── session.py   # per-connection state machine
+│   │   │   │   ├── session.py   # per-connection conversation: turns, streamed replies, corrections, barge-in
 │   │   │   │   ├── vad.py       # Silero VAD (ONNX) wrapper
 │   │   │   │   ├── audio.py     # resampling, PCM16 ↔ float32, framing
 │   │   │   │   └── pipeline.py  # STT → teacher → TTS with cancellation
 │   │   │   ├── teacher/
-│   │   │   │   ├── prompts/     # versioned prompt templates (.md)
+│   │   │   │   ├── prompts.py   # prompt templates (string.Template), reviewed like code
 │   │   │   │   ├── conversation.py
 │   │   │   │   ├── corrections.py   # structured-output parsing & validation
 │   │   │   │   └── drills.py        # sentence selection by weak phonemes
@@ -177,7 +177,11 @@ voice-tutor/
 
 ## Realtime protocol (`/ws/session`)
 
-One WebSocket per conversation. **Binary frames carry audio; text frames carry JSON events.** Every JSON event has `type` and `v` (protocol version).
+One WebSocket per conversation. **Binary frames carry audio; text frames carry JSON events.** Every JSON event has `type` and `v` (protocol version). The events are Pydantic models in `vt_contracts.ws`; they are added to the OpenAPI document (which cannot describe WebSockets), so the UI gets generated TypeScript types for them too.
+
+**Origin check.** Browsers apply no CORS to WebSockets: any page could open this socket and spend the learner's API credits. The api accepts only `VT_CORS_ORIGINS`, the page it serves itself, and clients that send no `Origin` (not browsers); others are closed with code 1008.
+
+Implemented so far: `session.start`, `input.text`, `input.interrupt`, `session.end` → `session.ready`, `transcript.final`, `assistant.text.delta`/`done`, `correction`, `turn.metrics`, `error`. Audio and drills follow.
 
 **Audio formats**
 - Client → server: PCM16 little-endian, mono, **16 kHz**, 20 ms frames (640 bytes).
@@ -187,7 +191,8 @@ One WebSocket per conversation. **Binary frames carry audio; text frames carry J
 
 | `type` | Payload | Meaning |
 |---|---|---|
-| `session.start` | `mode` (`conversation` \| `drill`), `level`, `topic?` | Begin a session |
+| `session.start` | `topic?` (level and explanation language come from the learner profile, `/v1/learner`) | Begin a session |
+| `input.text` | `text` | A typed message (same pipeline as a spoken one, without STT) |
 | `input.commit` | — | Push-to-talk released (manual end of turn) |
 | `input.interrupt` | — | User started speaking while the teacher talks |
 | `drill.next` | `phonemes?` | Ask for the next drill sentence |
@@ -197,11 +202,14 @@ One WebSocket per conversation. **Binary frames carry audio; text frames carry J
 
 | `type` | Payload | Meaning |
 |---|---|---|
+| `session.ready` | `level`, `provider`, `model` | Session started; which model answers |
 | `vad.speech_started` / `vad.speech_stopped` | `t_ms` | Voice activity |
-| `transcript.final` | `text`, `turn_id` | What the user said |
+| `transcript.final` | `text`, `turn_id`, `source` (`text` \| `voice`) | What the user said or typed |
 | `assistant.text.delta` | `text`, `turn_id` | Streaming teacher text |
+| `assistant.text.done` | `text`, `turn_id`, `interrupted` | The whole reply (what was sent, if interrupted) |
+| `turn.metrics` | `turn_id`, `first_token_ms`, `reply_ms` | Reply latency (Phase 0 measurements) |
 | `assistant.audio.started` / `assistant.audio.finished` | `turn_id`, `sample_rate` | Bracket the binary TTS frames |
-| `correction` | list of `{original, suggestion, kind, explanation}` | Grammar/wording feedback |
+| `correction` | `turn_id`, `corrected`, `items: [{original, suggestion, kind, explanation}]`, `latency_ms` | Feedback on the learner's message, computed **in parallel with the reply** (a second LLM call, JSON validated); the UI diffs `corrected` against the message, Tandem-style. A new message interrupts the reply but not the previous correction |
 | `drill.sentence` | `text`, `ipa`, `target_phonemes` | Sentence to read |
 | `pron.result` | per-phoneme verdicts + overall score | Pronunciation feedback |
 | `note.ready` | `note_id` | Session note written |

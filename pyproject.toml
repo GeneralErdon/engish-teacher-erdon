@@ -97,6 +97,7 @@ exclude_also = [
     "if TYPE_CHECKING:",
     "class .*\\bProtocol\\):",  # interfaces: bodies are `...`
     "raise NotImplementedError",
+    "assert_never\\(",  # exhaustiveness checks: unreachable by construction
     "@overload",
     "if __name__ == .__main__.:",
 ]

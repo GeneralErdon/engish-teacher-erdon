@@ -19,6 +19,7 @@ globalThis.ResizeObserver = ResizeObserverStub
 installMatchMedia()
 // The router restores scroll positions; jsdom does not implement scrolling.
 window.scrollTo = () => undefined
+Element.prototype.scrollIntoView = () => undefined
 
 afterEach(() => {
   cleanup()
