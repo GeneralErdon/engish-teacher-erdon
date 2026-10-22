@@ -10,6 +10,8 @@ from typing import Literal
 from pydantic import DirectoryPath, Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from vt_contracts.llm import ProviderKind
+
 type Profile = Literal["cpu", "nvidia", "amd", "external"]
 type SttBackend = Literal["openai", "whispercpp"]
 type CefrLevel = Literal["A1", "A2", "B1", "B2", "C1", "C2"]
@@ -42,7 +44,8 @@ class Settings(BaseSettings):
     ui_dir: DirectoryPath | None = None
     log_level: LogLevel = "INFO"
 
-    # Chat model (any OpenAI-compatible endpoint)
+    # Chat model. These apply until a provider is saved from the UI (`settings_path`).
+    llm_provider: ProviderKind = "openai_compatible"
     llm_base_url: HttpUrl = HttpUrl("http://llm:8080/v1")
     llm_model: str = "gemma-3-4b-it-q4"
     llm_api_key: SecretStr = SecretStr("")
@@ -72,4 +75,6 @@ class Settings(BaseSettings):
     # Storage and privacy
     notes_dir: Path = Path("/data/notes")
     db_path: Path = Path("/data/progress.db")
+    # Settings saved from the UI, API keys included (file mode 0600).
+    settings_path: Path = Path("/data/settings.json")
     keep_audio: bool = False

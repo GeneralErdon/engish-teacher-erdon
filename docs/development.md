@@ -24,7 +24,7 @@ Notes on choices that are not the newest thing available:
 - **TypeScript 6.0, not 7.** TypeScript 7 (the Go-native compiler) is out, but `typescript-eslint` supports `typescript <6.1`, and type-aware linting matters more here than compile speed. Move to 7 when `typescript-eslint` does.
 - **ESLint, not oxlint.** `create-vite` now defaults to oxlint (faster, fewer type-aware rules). Kept ESLint + `typescript-eslint` strict type-checked as the docs specified; revisit if lint time becomes a problem.
 - **mypy, not ty.** Astral's `ty` is still beta (0.0.x, `Development Status :: 4 - Beta`). It can be tried with `uvx ty check`, but mypy `--strict` stays the gate until ty is stable.
-- **httpx2.** Starlette 1.x prefers `httpx2` (the maintained fork) for its test client; `respx` still targets `httpx`, so the HTTP-mocking library for adapter contract tests is chosen in Phase 1 together with the adapters' HTTP client.
+- **httpx2, no respx.** `httpx2` is the maintained fork of `httpx`: Starlette 1.x uses it for its test client, and the `openai` and `anthropic` SDKs are built on it. Adapter contract tests fake providers with its built-in `httpx2.MockTransport` (canned responses, every request recorded), so `respx`, which still targets `httpx`, is not needed.
 
 ### First-time setup
 
@@ -95,7 +95,7 @@ Commit `uv.lock`, `pnpm-lock.yaml` and `Cargo.lock` together with the change.
 
 ## Code conventions
 
-- **Layering rule**: `domain` imports nothing from `adapters`, `http` or `realtime`. `ports` are `typing.Protocol`s. Wiring happens only in `container.py`. Enforced by the `import-linter` contracts in the root `pyproject.toml` (`just check`).
+- **Layering rule**: `domain` imports nothing from `adapters`, `http` or `realtime`. `ports` are `typing.Protocol`s. `services` hold the use cases the HTTP layer calls and depend on ports only. Wiring happens only in `container.py`. Enforced by the `import-linter` contracts in the root `pyproject.toml` (`just check`).
 - **No `Any` at boundaries**: external payloads are parsed into Pydantic models immediately; internal code receives typed objects.
 - **Value objects are immutable**: `@dataclass(frozen=True, slots=True)` or Pydantic models with `frozen=True`.
 - **Async everywhere in `api`**: no blocking calls in the event loop. CPU-bound work (VAD on large buffers, resampling) goes through `anyio.to_thread` or the `pron` service.
@@ -123,7 +123,7 @@ def phoneme_posteriors(audio: Float[Tensor, "samples"]) -> Float[Tensor, "frames
 | Layer | What | How |
 |---|---|---|
 | Unit | Scoring, alignment, corrections parsing, progress aggregation, audio framing | Pure functions; hypothesis for alignment invariants |
-| Contract | Each adapter against a recorded/fake server | HTTP mocks (respx or the httpx2 equivalent, decided in Phase 1) and fixture responses; one test per port method |
+| Contract | Each adapter against a recorded/fake server | `httpx2.MockTransport` with canned provider responses (JSON and SSE streams), passed to the SDK clients; one test per port method plus every error mapping |
 | Realtime | Full WS session with fake STT/LLM/TTS adapters | Starlette `TestClient` WebSocket; asserts event order, barge-in cancellation, error paths |
 | Golden audio | `pron` on short WAV fixtures with known verdicts | Tolerance-based assertions; runs on CPU in CI |
 | Eval (not CI) | L2-ARCTIC + latency | `just eval`; results committed to `eval/results/` |

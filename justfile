@@ -126,6 +126,7 @@ models:
 [env("VT_LLM_BASE_URL", LLM_DEV_URL)]
 [env("VT_NOTES_DIR", "data/notes")]
 [env("VT_PRON_BASE_URL", "http://localhost:8001")]
+[env("VT_SETTINGS_PATH", "data/settings.json")]
 [env("VT_STT_BASE_URL", "http://localhost:8000/v1")]
 [env("VT_TTS_BASE_URL", "http://localhost:8880/v1")]
 [group('dev')]
