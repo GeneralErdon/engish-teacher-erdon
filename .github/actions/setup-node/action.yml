@@ -8,9 +8,7 @@ runs:
       with:
         node-version-file: .nvmrc
         cache: pnpm
-    - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-      with:
-        just-version: 1.59.0
+    - uses: $/.github/actions/setup-just
     - name: Install the workspace (locked)
       shell: bash
       run: pnpm install --frozen-lockfile
