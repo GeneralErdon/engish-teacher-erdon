@@ -8,6 +8,17 @@
         ],
         "type": "string"
       },
+      "CefrLevel": {
+        "enum": [
+          "A1",
+          "A2",
+          "B1",
+          "B2",
+          "C1",
+          "C2"
+        ],
+        "type": "string"
+      },
       "ConnectionTestRequest": {
         "additionalProperties": false,
         "description": "Body of `POST /v1/llm/test`.",
@@ -98,6 +109,13 @@
         "title": "ConnectionTestResult",
         "type": "object"
       },
+      "ExplanationLanguage": {
+        "enum": [
+          "english",
+          "native"
+        ],
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -139,6 +157,56 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "LearnerProfile": {
+        "additionalProperties": false,
+        "description": "What the learner can change from the UI. Body of `PUT /v1/learner`.",
+        "properties": {
+          "explanations": {
+            "$ref": "#/components/schemas/ExplanationLanguage"
+          },
+          "level": {
+            "$ref": "#/components/schemas/CefrLevel"
+          }
+        },
+        "required": [
+          "level",
+          "explanations"
+        ],
+        "title": "LearnerProfile",
+        "type": "object"
+      },
+      "LearnerProfileView": {
+        "additionalProperties": false,
+        "description": "Body of `GET`/`PUT /v1/learner`.",
+        "properties": {
+          "explanations": {
+            "$ref": "#/components/schemas/ExplanationLanguage"
+          },
+          "level": {
+            "$ref": "#/components/schemas/CefrLevel"
+          },
+          "native_language": {
+            "title": "Native Language",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "environment",
+              "saved"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "explanations",
+          "native_language",
+          "source"
+        ],
+        "title": "LearnerProfileView",
         "type": "object"
       },
       "LlmSettingsView": {
@@ -468,6 +536,66 @@
         "summary": "Healthz",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/v1/learner": {
+      "get": {
+        "operationId": "get_learner_v1_learner_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearnerProfileView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Learner",
+        "tags": [
+          "learner"
+        ]
+      },
+      "put": {
+        "operationId": "save_learner_v1_learner_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LearnerProfile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearnerProfileView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Learner",
+        "tags": [
+          "learner"
         ]
       }
     },

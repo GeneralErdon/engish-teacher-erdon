@@ -28,10 +28,12 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_VAD_THRESHOLD` | float 0–1 | `0.5` | Silero speech probability threshold |
 | `VT_VAD_MIN_SILENCE_MS` | int > 0 | `600` | Silence that ends a turn |
 | `VT_LEARNER_L1` | ISO 639 code | `es` | Learner's native language (explanations and typical errors) |
-| `VT_LEARNER_LEVEL` | `A1…C2` | `B1` | Starting level |
+| `VT_LEARNER_LEVEL` | `A1…C2` | `B1` | Starting level. Changeable in the app (**Settings → Learning**), which wins |
+| `VT_LEARNER_EXPLANATIONS` | `english \| native` | `native` | Language of correction explanations: English, or `VT_LEARNER_L1`. Changeable in the app |
 | `VT_NOTES_DIR` | path | `/data/notes` | Markdown notes output |
 | `VT_DB_PATH` | path | `/data/progress.db` | SQLite database |
 | `VT_SETTINGS_PATH` | path | `/data/settings.json` | Settings saved from the UI, API keys included. Written with mode `0600` |
+| `VT_LEARNER_PROFILE_PATH` | path | `/data/learner.json` | Level and explanation language saved from the UI |
 | `VT_KEEP_AUDIO` | bool | `false` | Keep raw audio for debugging |
 
 `just dev-api` runs the api on your machine, so it overrides the model URLs with the ports Compose publishes on `127.0.0.1` (stt `8000`, llm `8081`, tts `8880`, pron `8001`) and stores data in `./data`.

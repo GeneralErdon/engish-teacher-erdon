@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, Palette, Server } from 'lucide-react'
+import { AlertTriangle, Bot, GraduationCap, Palette, Server } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -11,6 +11,7 @@ import { backendUrl } from '@/lib/platform'
 
 import { AppearanceSection } from './appearance-section'
 import { LanguageModelForm } from './language-model-form'
+import { LearningSection } from './learning-section'
 import { useLlmSettings, useProviders } from './use-llm'
 
 export function SettingsPage() {
@@ -19,7 +20,7 @@ export function SettingsPage() {
       <header className="flex flex-col gap-2">
         <h1 className="text-3xl font-semibold">Settings</h1>
         <p className="text-muted-foreground">
-          The model your tutor thinks with, and how the app looks.
+          The model your tutor thinks with, how you learn, and how the app looks.
         </p>
       </header>
 
@@ -29,6 +30,14 @@ export function SettingsPage() {
         description="Pick who answers: a model on this computer, a free cloud tier, or your own API key. Keys stay in the backend and are never shown again."
       >
         <LanguageModelSection />
+      </Section>
+
+      <Section
+        icon={<GraduationCap />}
+        title="Learning"
+        description="Your level, and the language your mistakes are explained in."
+      >
+        <LearningSection />
       </Section>
 
       <Section
