@@ -1,8 +1,10 @@
 """One conversation over `/ws/session`: the learner's turns (typed, or spoken and transcribed),
-the tutor's streamed replies and the corrections, which run alongside each reply.
+the tutor's streamed replies, spoken sentence by sentence when the learner wants a voice, and
+the corrections, which run alongside each reply.
 
-A new message interrupts the reply in progress (barge-in) but not the correction of the
-previous message: that feedback is still useful. Everything stops when the session closes.
+A new message interrupts the reply in progress (barge-in), its voice included, but not the
+correction of the previous message: that feedback is still useful. Everything stops when the
+session closes.
 """
 
 import asyncio
@@ -16,13 +18,17 @@ from typing import Literal, assert_never
 from vt_api.domain.audio import duration_s, to_wav
 from vt_api.domain.llm import PROVIDERS, ChatMessage, ProviderError
 from vt_api.ports.llm import ChatModel
-from vt_api.ports.speech import SpeechToText
+from vt_api.ports.speech import SpeechToText, TextToSpeech
+from vt_api.realtime.sentences import SentenceSplitter, speakable
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
 from vt_api.teacher.conversation import correction_messages, reply_messages
 from vt_api.teacher.corrections import CorrectionParseError, parse_correction
+from vt_contracts.audio import OUTPUT_SAMPLE_RATE_HZ
 from vt_contracts.learner import LearnerProfile
 from vt_contracts.ws import (
+    AssistantAudioDone,
+    AssistantAudioStarted,
     AssistantTextDelta,
     AssistantTextDone,
     ClientEvent,
@@ -36,6 +42,7 @@ from vt_contracts.ws import (
     SessionEnd,
     SessionReady,
     SessionStart,
+    SessionUpdate,
     TranscriptFinal,
     TurnMetrics,
 )
@@ -43,6 +50,7 @@ from vt_contracts.ws import (
 logger = logging.getLogger(__name__)
 
 type Send = Callable[[ServerEvent], Awaitable[None]]
+type SendAudio = Callable[[bytes], Awaitable[None]]
 
 HISTORY_LIMIT = 20
 """Messages sent to the model with each reply: enough context, bounded cost."""
@@ -65,17 +73,22 @@ class ConversationSession:
         self,
         *,
         send: Send,
+        send_audio: SendAudio,
         llm: LlmService,
         learner: LearnerService,
-        speech: SpeechToText,
+        stt: SpeechToText,
+        tts: TextToSpeech,
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self._send = send
+        self._send_audio = send_audio
         self._llm = llm
         self._learner = learner
-        self._speech = speech
+        self._stt = stt
+        self._tts = tts
         self._clock = clock
         self._started: _Started | None = None
+        self._speak = False
         self._history: list[ChatMessage] = []
         self._turns = 0
         self._reply: asyncio.Task[None] | None = None
@@ -88,7 +101,10 @@ class ConversationSession:
         """Apply one client event. `False` once the session is over."""
         match event:
             case SessionStart():
+                self._speak = event.speak
                 await self._start(event.topic)
+            case SessionUpdate():
+                self._speak = event.speak
             case InputText():
                 await self.learner_said(event.text, "text")
             case InputCommit():
@@ -138,7 +154,7 @@ class ConversationSession:
     async def _run_voice(self, pcm: bytes) -> None:
         since = self._clock()
         try:
-            text = await self._speech.transcribe(to_wav(pcm))
+            text = await self._stt.transcribe(to_wav(pcm))
         except ProviderError as error:
             await self._error("stt_failed", f"Speech recognition failed. {error.message}")
             return
@@ -179,7 +195,8 @@ class ConversationSession:
         )
 
     async def interrupt(self) -> None:
-        """Stop the reply in progress, if any; its partial text stays in the history."""
+        """Stop the reply in progress and its voice, if any; its partial text stays in the
+        history."""
         if self._reply is not None:
             await _cancel(self._reply)
             self._reply = None
@@ -194,30 +211,49 @@ class ConversationSession:
 
     async def _run_reply(self, started: _Started, turn_id: str, since: float) -> None:
         messages = reply_messages(self._history[-HISTORY_LIMIT:], started.profile, started.topic)
+        speaker = (
+            _Speaker(
+                self._tts, self._send, self._send_audio, turn_id, lambda: self._elapsed_ms(since)
+            )
+            if self._speak
+            else None
+        )
         parts: list[str] = []
         first_token_ms: int | None = None
         try:
-            async for chunk in started.model.stream(messages):
-                if first_token_ms is None:
-                    first_token_ms = self._elapsed_ms(since)
-                parts.append(chunk)
-                await self._send(AssistantTextDelta(turn_id=turn_id, text=chunk))
-        except ProviderError as error:
-            await self._error("llm_failed", error.message)
-            return
-        except asyncio.CancelledError:
+            try:
+                async for chunk in started.model.stream(messages):
+                    if first_token_ms is None:
+                        first_token_ms = self._elapsed_ms(since)
+                    parts.append(chunk)
+                    await self._send(AssistantTextDelta(turn_id=turn_id, text=chunk))
+                    if speaker:
+                        speaker.add(chunk)
+            except ProviderError as error:
+                await self._error("llm_failed", error.message)
+                return
+            except asyncio.CancelledError:
+                self._remember_reply(parts)
+                with suppress(Exception):  # the socket may already be gone
+                    await self._send(
+                        AssistantTextDone(turn_id=turn_id, text="".join(parts), interrupted=True)
+                    )
+                raise
+            reply_ms = self._elapsed_ms(since)
             self._remember_reply(parts)
-            with suppress(Exception):  # the socket may already be gone
-                await self._send(
-                    AssistantTextDone(turn_id=turn_id, text="".join(parts), interrupted=True)
+            await self._send(AssistantTextDone(turn_id=turn_id, text="".join(parts)))
+            first_audio_ms = await speaker.finish() if speaker else None
+            await self._send(
+                TurnMetrics(
+                    turn_id=turn_id,
+                    first_token_ms=first_token_ms,
+                    reply_ms=reply_ms,
+                    first_audio_ms=first_audio_ms,
                 )
-            raise
-        reply_ms = self._elapsed_ms(since)
-        self._remember_reply(parts)
-        await self._send(AssistantTextDone(turn_id=turn_id, text="".join(parts)))
-        await self._send(
-            TurnMetrics(turn_id=turn_id, first_token_ms=first_token_ms, reply_ms=reply_ms)
-        )
+            )
+        finally:
+            if speaker:
+                await speaker.stop()
 
     def _remember_reply(self, parts: list[str]) -> None:
         if reply := "".join(parts):
@@ -242,6 +278,76 @@ class ConversationSession:
                 latency_ms=self._elapsed_ms(since),
             )
         )
+
+
+class _Speaker:
+    """Speaks one reply while it streams in: each complete sentence goes to text-to-speech, one
+    at a time and in order, and its audio to the client as soon as it is produced."""
+
+    def __init__(
+        self,
+        tts: TextToSpeech,
+        send: Send,
+        send_audio: SendAudio,
+        turn_id: str,
+        elapsed_ms: Callable[[], int],
+    ) -> None:
+        self._tts = tts
+        self._send = send
+        self._send_audio = send_audio
+        self._turn_id = turn_id
+        self._elapsed_ms = elapsed_ms
+        self._sentences = SentenceSplitter()
+        self._queue: asyncio.Queue[str | None] = asyncio.Queue()
+        self._first_audio_ms: int | None = None
+        self._task = asyncio.create_task(self._run())
+
+    def add(self, text: str) -> None:
+        for sentence in self._sentences.feed(text):
+            self._queue.put_nowait(sentence)
+
+    async def finish(self) -> int | None:
+        """Speak the rest of the reply; return when the tutor's first audio was sent."""
+        for sentence in self._sentences.flush():
+            self._queue.put_nowait(sentence)
+        self._queue.put_nowait(None)
+        await asyncio.wait([self._task])
+        return self._first_audio_ms
+
+    async def stop(self) -> None:
+        """Stop speaking (a no-op once finished)."""
+        await _cancel(self._task)
+
+    async def _run(self) -> None:
+        try:
+            while (sentence := await self._queue.get()) is not None:
+                if text := speakable(sentence):
+                    async for pcm in self._tts.synthesize(text):
+                        await self._audio(pcm)
+        except ProviderError as error:
+            # The reply goes on as text only.
+            await self._send(
+                ErrorEvent(
+                    code="tts_failed",
+                    message=f"The tutor's voice failed. {error.message}",
+                    retryable=True,
+                )
+            )
+        except asyncio.CancelledError:
+            if self._first_audio_ms is not None:
+                with suppress(Exception):  # the socket may already be gone
+                    await self._send(AssistantAudioDone(turn_id=self._turn_id, interrupted=True))
+            raise
+        if self._first_audio_ms is not None:
+            await self._send(AssistantAudioDone(turn_id=self._turn_id))
+
+    async def _audio(self, pcm: bytes) -> None:
+        if self._first_audio_ms is None:
+            self._first_audio_ms = self._elapsed_ms()
+            await self._send(
+                AssistantAudioStarted(turn_id=self._turn_id, sample_rate=OUTPUT_SAMPLE_RATE_HZ)
+            )
+        await self._send_audio(pcm)
 
 
 async def _cancel(task: asyncio.Task[None]) -> None:

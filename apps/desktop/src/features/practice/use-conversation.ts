@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 
 import type { Schemas } from '@/lib/api/client'
+import { createVoicePlayer, type VoicePlayer } from '@/lib/audio/player'
 import { backendUrl } from '@/lib/platform'
 
 export type ServerEvent = Schemas['ServerEvent']
@@ -26,6 +27,8 @@ export interface ConversationState {
   status: 'connecting' | 'open' | 'closed'
   session?: Schemas['SessionReady']
   turns: Turn[]
+  /** The turn whose reply was last spoken aloud. */
+  voiceTurn?: string
   error?: string | undefined
 }
 
@@ -73,6 +76,11 @@ export function reducer(state: ConversationState, action: Action): ConversationS
         replyDone: true,
         interrupted: action.interrupted,
       }))
+    case 'assistant.audio.started':
+      return { ...state, voiceTurn: action.turn_id }
+    case 'assistant.audio.done':
+      // The audio itself was handled as it arrived (binary frames, see `useConversation`).
+      return state
     case 'correction':
       return updateTurn(state, action.turn_id, (turn) => ({ ...turn, correction: action }))
     case 'turn.metrics':
@@ -97,41 +105,102 @@ export function sessionUrl(base: string) {
   return `${base.replace(/^http/, 'ws')}/ws/session`
 }
 
+export interface ConversationOptions {
+  /** The tutor reads its replies aloud. Can change during the conversation. */
+  speak?: boolean
+  url?: string
+}
+
 /**
- * One conversation over `/ws/session`: connects, starts the session, and folds the server's
- * events into turns. `reconnect` opens a fresh conversation.
+ * One conversation over `/ws/session`: connects, starts the session, folds the server's events
+ * into turns and plays the tutor's voice. `reconnect` opens a fresh conversation.
  */
-export function useConversation(url = sessionUrl(backendUrl())) {
+export function useConversation({
+  speak = false,
+  url = sessionUrl(backendUrl()),
+}: ConversationOptions = {}) {
   const [state, dispatch] = useReducer(reducer, initial)
   const socket = useRef<WebSocket | null>(null)
+  const started = useRef(false)
   const [attempt, nextAttempt] = useReducer((n: number) => n + 1, 0)
 
-  useEffect(() => {
-    dispatch({ type: 'status', status: 'connecting' })
-    const ws = new WebSocket(url)
-    socket.current = ws
-    const send = (event: ClientEvent) => {
-      ws.send(JSON.stringify(event))
-    }
-    ws.onopen = () => {
-      dispatch({ type: 'status', status: 'open' })
-      send({ type: 'session.start', v: 1, topic: null })
-    }
-    ws.onmessage = (message: MessageEvent<string>) => {
-      dispatch(JSON.parse(message.data) as ServerEvent)
-    }
-    ws.onclose = () => {
-      dispatch({ type: 'status', status: 'closed' })
-    }
-    return () => {
-      ws.onclose = null
-      ws.close()
-    }
-  }, [url, attempt])
+  const [speaking, setSpeaking] = useState(false)
+  const speakRef = useRef(speak)
+  const player = useRef<VoicePlayer | null>(null)
+  /** Binary frames play while this is set: between `assistant.audio.started` and `.done`. */
+  const voice = useRef<{ turnId: string; sampleRate: number } | null>(null)
+  const lastTurn = useRef<string | null>(null)
+  /** A turn the learner interrupted: its audio may still be on the way, and must not play. */
+  const muted = useRef<string | null>(null)
+
+  const getPlayer = useCallback(() => (player.current ??= createVoicePlayer(setSpeaking)), [])
 
   const send = useCallback((event: ClientEvent) => {
     socket.current?.send(JSON.stringify(event))
   }, [])
+
+  /** Stop the tutor's voice now, including audio of this turn still on its way. */
+  const silence = useCallback(() => {
+    muted.current = lastTurn.current
+    voice.current = null
+    player.current?.stop()
+  }, [])
+
+  useEffect(() => {
+    dispatch({ type: 'status', status: 'connecting' })
+    const ws = new WebSocket(url)
+    ws.binaryType = 'arraybuffer'
+    socket.current = ws
+    ws.onopen = () => {
+      dispatch({ type: 'status', status: 'open' })
+      ws.send(JSON.stringify({ type: 'session.start', v: 1, topic: null, speak: speakRef.current }))
+      started.current = true
+    }
+    ws.onmessage = (message: MessageEvent<string | ArrayBuffer>) => {
+      if (typeof message.data !== 'string') {
+        if (voice.current) getPlayer().play(message.data, voice.current.sampleRate)
+        return
+      }
+      const event = JSON.parse(message.data) as ServerEvent
+      if (event.type === 'transcript.final') lastTurn.current = event.turn_id
+      if (event.type === 'assistant.audio.started' && event.turn_id !== muted.current) {
+        voice.current = { turnId: event.turn_id, sampleRate: event.sample_rate }
+      }
+      if (event.type === 'assistant.audio.done') voice.current = null
+      dispatch(event)
+    }
+    ws.onclose = () => {
+      started.current = false
+      dispatch({ type: 'status', status: 'closed' })
+    }
+    return () => {
+      started.current = false
+      ws.onclose = null
+      ws.close()
+    }
+  }, [url, attempt, getPlayer])
+
+  // Voice on or off during the conversation: the server applies it from the next reply, and
+  // the reply playing now stops at once.
+  useEffect(() => {
+    if (speakRef.current === speak) return
+    speakRef.current = speak
+    if (!speak) silence()
+    if (started.current) send({ type: 'session.update', v: 1, speak })
+  }, [speak, send, silence])
+
+  // Never leave audio playing after leaving the page.
+  useEffect(
+    () => () => {
+      void player.current?.close()
+    },
+    [],
+  )
+
+  /** Sending audio needs a user gesture first: call from a click or key handler. */
+  const unlockAudio = useCallback(() => {
+    if (speakRef.current) getPlayer().unlock()
+  }, [getPlayer])
 
   /** Microphone audio for the turn being recorded (binary frames). */
   const sendAudio = useCallback((pcm: ArrayBuffer) => {
@@ -142,12 +211,19 @@ export function useConversation(url = sessionUrl(backendUrl())) {
   return {
     ...state,
     replying: last !== undefined && !last.replyDone,
+    /** The tutor's voice is playing. */
+    speaking,
     say: (text: string) => {
+      // A new message interrupts the reply, on the server and in the speakers.
+      silence()
+      unlockAudio()
       send({ type: 'input.text', v: 1, text })
     },
     interrupt: () => {
+      silence()
       send({ type: 'input.interrupt', v: 1 })
     },
+    unlockAudio,
     sendAudio,
     /** The learner stopped speaking: transcribe and answer. */
     commit: () => {

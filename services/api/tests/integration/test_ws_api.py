@@ -1,5 +1,5 @@
-"""`/ws/session` end to end: real session, service and adapters; the provider is faked at the
-HTTP transport (an OpenAI-compatible server answering with SSE streams)."""
+"""`/ws/session` end to end: real session, service and adapters; the providers are faked at the
+HTTP transport (OpenAI-compatible servers answering with SSE streams, JSON and raw PCM)."""
 
 import json
 from pathlib import Path
@@ -15,13 +15,16 @@ from starlette.websockets import WebSocketDisconnect
 from vt_api.adapters.chat_factory import SdkChatModelFactory
 from vt_api.adapters.json_llm_config import JsonLlmConfigRepository
 from vt_api.adapters.openai_stt import OpenAISpeechToText
+from vt_api.adapters.openai_tts import OpenAITextToSpeech
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.domain.llm import environment_config
 from vt_api.main import create_app
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
-from vt_contracts.ws import SERVER_EVENT, ServerEvent
+from vt_contracts.ws import SERVER_EVENT, ServerEvent, TurnMetrics
+
+VOICE = b"\x01\x00" * 2_400  # 0.1 s of PCM16 at 24 kHz
 
 CORRECTION = {
     "corrected": "I went to the beach",
@@ -54,6 +57,8 @@ def _sse(*texts: str) -> httpx2.Response:
 def _provider(request: httpx2.Request) -> httpx2.Response:
     if request.url.path.endswith("/audio/transcriptions"):
         return httpx2.Response(200, json={"text": "I have went to the beach"})
+    if request.url.path.endswith("/audio/speech"):
+        return httpx2.Response(200, content=VOICE, headers={"content-type": "audio/pcm"})
     if request.url.path.endswith("/models"):
         model = {"id": "whisper", "object": "model", "created": 0, "owned_by": "speaches"}
         return httpx2.Response(200, json={"object": "list", "data": [model]})
@@ -79,21 +84,40 @@ def client(tmp_path: Path, learner_service: LearnerService) -> TestClient:
         chat_models=chat_models,
         environment=environment,
     )
-    speech = OpenAISpeechToText(
-        openai.AsyncOpenAI(
+
+    def speech_client(base_url: str) -> openai.AsyncOpenAI:
+        return openai.AsyncOpenAI(
             api_key="none",
-            base_url="http://stt/v1",
+            base_url=base_url,
             http_client=httpx2.AsyncClient(transport=transport),
             max_retries=0,
-        ),
-        "whisper",
+        )
+
+    container = Container(
+        llm=llm,
+        learner=learner_service,
+        stt=OpenAISpeechToText(speech_client("http://stt/v1"), "whisper"),
+        tts=OpenAITextToSpeech(speech_client("http://tts/v1"), "kokoro", "af_heart", 1.0),
     )
-    container = Container(llm=llm, learner=learner_service, speech=speech)
     return TestClient(create_app(Settings(_env_file=None), container=container))
 
 
 def _receive(ws: WebSocketTestSession, count: int) -> list[ServerEvent]:
     return [SERVER_EVENT.validate_json(ws.receive_text()) for _ in range(count)]
+
+
+def _receive_until(ws: WebSocketTestSession, kind: str) -> list[ServerEvent | bytes]:
+    """Events and audio frames, up to and including the first event of type `kind`."""
+    frames: list[ServerEvent | bytes] = []
+    while True:
+        message = ws.receive()
+        if (pcm := message.get("bytes")) is not None:
+            frames.append(pcm)
+            continue
+        event = SERVER_EVENT.validate_json(message["text"])
+        frames.append(event)
+        if event.type == kind:
+            return frames
 
 
 def test_a_conversation_over_the_socket(client: TestClient) -> None:
@@ -136,6 +160,26 @@ def test_a_spoken_turn(client: TestClient) -> None:
     }
 
 
+def test_the_tutor_speaks(client: TestClient) -> None:
+    with client.websocket_connect("/ws/session") as ws:
+        ws.send_text(json.dumps({"type": "session.start", "v": 1, "speak": True}))
+        _receive(ws, 1)
+        ws.send_text(json.dumps({"type": "input.text", "v": 1, "text": "Hello"}))
+        frames = _receive_until(ws, "turn.metrics")
+        ws.send_text(json.dumps({"type": "session.end", "v": 1}))
+
+    kinds = [frame if isinstance(frame, bytes) else frame.type for frame in frames]
+    started = kinds.index("assistant.audio.started")
+    done = kinds.index("assistant.audio.done")
+    voice = kinds[started + 1 : done]
+    # Two sentences, "Nice!" and "What did you do?": two clips, only audio between the brackets.
+    assert b"".join(frame for frame in voice if isinstance(frame, bytes)) == VOICE * 2
+    assert all(isinstance(frame, bytes) or frame.startswith("assistant.text") for frame in voice)
+    metrics = frames[-1]
+    assert isinstance(metrics, TurnMetrics)
+    assert metrics.first_audio_ms is not None
+
+
 def test_invalid_events_get_an_error_and_the_session_goes_on(client: TestClient) -> None:
     with client.websocket_connect("/ws/session") as ws:
         ws.send_text('{"type": "dance", "v": 1}')
@@ -173,6 +217,7 @@ def test_the_schema_describes_the_socket_events(client: TestClient) -> None:
     events = schema["components"]["schemas"]
     assert set(events["ClientEvent"]["discriminator"]["mapping"]) == {
         "session.start",
+        "session.update",
         "input.text",
         "input.commit",
         "input.interrupt",
@@ -185,10 +230,18 @@ def test_the_schema_describes_the_socket_events(client: TestClient) -> None:
 def test_speech_status(client: TestClient) -> None:
     status = client.get("/v1/speech/status").json()
 
-    assert status == {
+    assert status["recognition"] == {
         "base_url": "http://stt/v1",
         "model": "whisper",
         "reachable": True,
         "model_ready": True,
         "detail": None,
+    }
+    # The fake server lists only "whisper".
+    assert status["synthesis"] == {
+        "base_url": "http://tts/v1",
+        "model": "kokoro",
+        "reachable": True,
+        "model_ready": False,
+        "detail": "The model kokoro is not downloaded.",
     }

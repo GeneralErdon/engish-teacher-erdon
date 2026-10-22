@@ -4,7 +4,8 @@ SDK): Speaches locally, or any compatible server."""
 import openai
 
 from vt_api.adapters.openai_chat import provider_error
-from vt_contracts.speech import SpeechStatus
+from vt_api.adapters.openai_models import base_url, model_status
+from vt_contracts.speech import ModelStatus
 
 LANGUAGE = "en"
 """The learner practises English: telling Whisper skips language detection (faster, and no
@@ -16,10 +17,6 @@ class OpenAISpeechToText:
         self._client = client
         self._model = model
 
-    @property
-    def _base_url(self) -> str:
-        return str(self._client.base_url).rstrip("/")
-
     async def transcribe(self, wav: bytes) -> str:
         try:
             result = await self._client.audio.transcriptions.create(
@@ -29,21 +26,8 @@ class OpenAISpeechToText:
                 response_format="json",
             )
         except openai.APIError as error:
-            raise provider_error(error, self._base_url) from error
+            raise provider_error(error, base_url(self._client)) from error
         return result.text.strip()
 
-    async def status(self) -> SpeechStatus:
-        status = SpeechStatus(
-            base_url=self._base_url, model=self._model, reachable=False, model_ready=False
-        )
-        try:
-            models = [model.id async for model in self._client.models.list()]
-        except openai.APIError as error:
-            return status.model_copy(
-                update={"detail": provider_error(error, self._base_url).message}
-            )
-        if self._model not in models:
-            return status.model_copy(
-                update={"reachable": True, "detail": f"The model {self._model} is not downloaded."}
-            )
-        return status.model_copy(update={"reachable": True, "model_ready": True})
+    async def status(self) -> ModelStatus:
+        return await model_status(self._client, self._model)

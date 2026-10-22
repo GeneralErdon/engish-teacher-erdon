@@ -6,27 +6,32 @@ from dataclasses import dataclass
 
 import anthropic
 import openai
+from pydantic import HttpUrl
 
 from vt_api.adapters.chat_factory import SdkChatModelFactory
 from vt_api.adapters.json_learner_profile import JsonLearnerProfileRepository
 from vt_api.adapters.json_llm_config import JsonLlmConfigRepository
 from vt_api.adapters.openai_stt import OpenAISpeechToText
+from vt_api.adapters.openai_tts import OpenAITextToSpeech
 from vt_api.config import Settings
 from vt_api.domain.llm import environment_config
-from vt_api.ports.speech import SpeechToText
+from vt_api.ports.speech import SpeechToText, TextToSpeech
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
 from vt_contracts.learner import LearnerProfile
 
 STT_TIMEOUT_S = 60.0
 """A long turn on a slow CPU can take a while to transcribe."""
+TTS_TIMEOUT_S = 30.0
+"""Per read: the first sentence loads the voice model if the server unloaded it."""
 
 
 @dataclass(frozen=True, slots=True)
 class Container:
     llm: LlmService
     learner: LearnerService
-    speech: SpeechToText
+    stt: SpeechToText
+    tts: TextToSpeech
 
 
 @asynccontextmanager
@@ -38,18 +43,27 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
             anthropic_http=anthropic.DefaultAsyncHttpxClient(),
         )
         stack.push_async_callback(chat_models.aclose)
-        stt_http = openai.DefaultAsyncHttpxClient()
-        stack.push_async_callback(stt_http.aclose)
-        speech = OpenAISpeechToText(
-            openai.AsyncOpenAI(
+        speech_http = openai.DefaultAsyncHttpxClient()
+        stack.push_async_callback(speech_http.aclose)
+
+        def speech_client(base_url: HttpUrl, timeout: float) -> openai.AsyncOpenAI:
+            return openai.AsyncOpenAI(
                 # Local Speaches needs no key; never let the SDK fall back to OPENAI_API_KEY.
                 api_key="none",
-                base_url=str(settings.stt_base_url),
-                http_client=stt_http,
-                timeout=STT_TIMEOUT_S,
+                base_url=str(base_url),
+                http_client=speech_http,
+                timeout=timeout,
                 max_retries=0,
-            ),
-            settings.stt_model,
+            )
+
+        stt = OpenAISpeechToText(
+            speech_client(settings.stt_base_url, STT_TIMEOUT_S), settings.stt_model
+        )
+        tts = OpenAITextToSpeech(
+            speech_client(settings.tts_base_url, TTS_TIMEOUT_S),
+            model=settings.tts_model,
+            voice=settings.tts_voice,
+            speed=settings.tts_speed,
         )
         environment = environment_config(
             kind=settings.llm_provider,
@@ -70,5 +84,6 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
                 ),
                 native_language=settings.learner_l1,
             ),
-            speech=speech,
+            stt=stt,
+            tts=tts,
         )

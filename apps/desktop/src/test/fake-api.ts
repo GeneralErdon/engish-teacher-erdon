@@ -101,11 +101,20 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
     settings: structuredClone(ENVIRONMENT),
     learner: { level: 'B1', explanations: 'native', native_language: 'es', source: 'environment' },
     speech: {
-      base_url: 'http://localhost:8000/v1',
-      model: 'Systran/faster-distil-whisper-small.en',
-      reachable: true,
-      model_ready: true,
-      detail: null,
+      recognition: {
+        base_url: 'http://localhost:8000/v1',
+        model: 'Systran/faster-distil-whisper-small.en',
+        reachable: true,
+        model_ready: true,
+        detail: null,
+      },
+      synthesis: {
+        base_url: 'http://localhost:8000/v1',
+        model: 'speaches-ai/Kokoro-82M-v1.0-ONNX',
+        reachable: true,
+        model_ready: true,
+        detail: null,
+      },
     },
   }
 

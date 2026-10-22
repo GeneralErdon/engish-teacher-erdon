@@ -130,7 +130,7 @@ models:
 [env("VT_LEARNER_PROFILE_PATH", "data/learner.json")]
 [env("VT_SETTINGS_PATH", "data/settings.json")]
 [env("VT_STT_BASE_URL", "http://localhost:8000/v1")]
-[env("VT_TTS_BASE_URL", "http://localhost:8880/v1")]
+[env("VT_TTS_BASE_URL", "http://localhost:8000/v1")]
 [group('dev')]
 dev-api:
     uv run uvicorn --factory vt_api.main:create_app --reload --reload-dir services/api/src --reload-dir packages/contracts/src --port 8080

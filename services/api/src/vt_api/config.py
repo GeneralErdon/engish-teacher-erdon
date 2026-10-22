@@ -57,10 +57,12 @@ class Settings(BaseSettings):
     # Speaches model id. CPU: distil small.en (fast). GPU: Systran/faster-whisper-large-v3-turbo.
     stt_model: str = "Systran/faster-distil-whisper-small.en"
 
-    # Text-to-speech
-    tts_base_url: HttpUrl = HttpUrl("http://tts:8880/v1")
+    # Text-to-speech: Kokoro, served by the same Speaches as speech-to-text.
+    tts_base_url: HttpUrl = HttpUrl("http://tts:8000/v1")
+    tts_model: str = "speaches-ai/Kokoro-82M-v1.0-ONNX"
     tts_voice: str = "af_heart"
-    tts_speed: float = Field(default=0.95, gt=0.0, le=4.0)
+    # Kokoro's range. Slightly slower than normal helps learners.
+    tts_speed: float = Field(default=0.95, ge=0.5, le=2.0)
 
     # Pronunciation scoring
     pron_base_url: HttpUrl = HttpUrl("http://pron:8001")

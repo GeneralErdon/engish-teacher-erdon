@@ -1,15 +1,17 @@
 import { Link } from '@tanstack/react-router'
-import { MessagesSquare, MicOff, RotateCw, WifiOff } from 'lucide-react'
+import { MessagesSquare, MicOff, RotateCw, Volume2, VolumeOff, WifiOff } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { useSpeechStatus } from '@/features/settings/use-speech'
 
 import { Composer } from './composer'
 import { TurnView } from './turn-view'
 import { useConversation } from './use-conversation'
 import { useRecorder } from './use-recorder'
+import { useVoiceReplies } from './use-voice-replies'
 
 const STARTERS = [
   'Hi! Can we talk about my weekend?',
@@ -18,20 +20,26 @@ const STARTERS = [
 ]
 
 export function PracticePage() {
-  const conversation = useConversation()
+  const [voiceReplies, setVoiceReplies] = useVoiceReplies()
+  const speech = useSpeechStatus()
+  const voiceReady = speech.data?.synthesis.model_ready
+  // Until the status arrives, assume the voice works: if it does not, the server says so.
+  const conversation = useConversation({ speak: voiceReplies && voiceReady !== false })
   const recorder = useRecorder(conversation.sendAudio)
   const end = useRef<HTMLDivElement>(null)
   const { turns, session, status } = conversation
   const lastReply = turns.at(-1)?.reply
+  const busy = conversation.replying || conversation.speaking
 
   const toggleMic = async () => {
+    conversation.unlockAudio()
     if (recorder.state === 'recording') {
       await recorder.stop()
       conversation.commit()
       return
     }
     // Speaking over the tutor interrupts it, like in a real conversation.
-    if (conversation.replying) conversation.interrupt()
+    if (busy) conversation.interrupt()
     await recorder.start()
   }
 
@@ -52,6 +60,26 @@ export function PracticePage() {
             </Badge>
           </div>
         )}
+        <div className="ml-auto">
+          {voiceReady === false ? (
+            <Button size="sm" variant="ghost" asChild>
+              <Link to="/settings">
+                <VolumeOff /> Set up the tutor&apos;s voice
+              </Link>
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-pressed={voiceReplies}
+              onClick={() => {
+                setVoiceReplies(!voiceReplies)
+              }}
+            >
+              {voiceReplies ? <Volume2 /> : <VolumeOff />} Voice {voiceReplies ? 'on' : 'off'}
+            </Button>
+          )}
+        </div>
       </header>
 
       {status === 'closed' && (
@@ -107,7 +135,11 @@ export function PracticePage() {
       ) : (
         <ol aria-label="Conversation" aria-live="polite" className="flex flex-1 flex-col gap-6">
           {turns.map((turn) => (
-            <TurnView key={turn.id} turn={turn} />
+            <TurnView
+              key={turn.id}
+              turn={turn}
+              speaking={conversation.speaking && turn.id === conversation.voiceTurn}
+            />
           ))}
         </ol>
       )}
@@ -122,7 +154,7 @@ export function PracticePage() {
         )}
         <Composer
           disabled={!session || status !== 'open'}
-          replying={conversation.replying}
+          replying={busy}
           recorder={recorder.state}
           meter={recorder.meter}
           onSend={conversation.say}

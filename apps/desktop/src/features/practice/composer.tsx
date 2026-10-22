@@ -8,7 +8,7 @@ import type { RecorderState } from './use-recorder'
 
 /**
  * Type and press Enter (Shift+Enter for a new line), or press the microphone, speak, and press
- * it again to send. While the tutor answers, a stop button interrupts it.
+ * it again to send. While the tutor answers (writing or speaking), a stop button interrupts it.
  */
 export function Composer({
   disabled,

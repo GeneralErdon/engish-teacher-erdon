@@ -40,6 +40,8 @@ export function HomePage() {
   const provider = providers.data?.find((p) => p.kind === active)
   const model = settings.data?.providers.find((p) => p.kind === active)?.model
   const modelChosen = settings.data?.source === 'saved'
+  const hearing = speech.data?.recognition.model_ready
+  const speaking = speech.data?.synthesis.model_ready
 
   return (
     <m.div variants={list} initial="hidden" animate="show" className="flex flex-col gap-8">
@@ -144,10 +146,10 @@ export function HomePage() {
           title="Voice"
           badge={
             speech.data &&
-            (speech.data.model_ready ? (
+            (hearing && speaking ? (
               <Badge className="bg-success/15 text-success">Ready</Badge>
             ) : (
-              <Badge variant="outline">Not set up</Badge>
+              <Badge variant="outline">{hearing || speaking ? 'Half set up' : 'Not set up'}</Badge>
             ))
           }
         >
@@ -156,11 +158,13 @@ export function HomePage() {
           {speech.data && (
             <div className="flex flex-col items-start gap-2">
               <p>
-                {speech.data.model_ready
-                  ? 'Press the mic in Practice and speak.'
-                  : 'Speech recognition runs on your machine; it needs a one-time setup.'}
+                {hearing && speaking
+                  ? 'Press the mic in Practice and speak: your tutor answers out loud.'
+                  : hearing
+                    ? 'You can speak to your tutor; its voice needs a one-time setup.'
+                    : 'Speech runs on your machine; it needs a one-time setup.'}
               </p>
-              {!speech.data.model_ready && (
+              {!(hearing && speaking) && (
                 <Button size="sm" variant="link" className="h-auto px-0" asChild>
                   <Link to="/settings">Set it up</Link>
                 </Button>

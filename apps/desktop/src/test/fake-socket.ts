@@ -12,8 +12,9 @@ export class FakeSocket {
   /** Binary frames (microphone audio). */
   readonly audio: ArrayBuffer[] = []
   closed = false
+  binaryType: BinaryType = 'blob'
   onopen: ((event: Event) => void) | null = null
-  onmessage: ((event: MessageEvent<string>) => void) | null = null
+  onmessage: ((event: MessageEvent<string | ArrayBuffer>) => void) | null = null
   onclose: ((event: CloseEvent) => void) | null = null
 
   constructor(url: string) {
@@ -49,6 +50,13 @@ export class FakeSocket {
       for (const event of events) {
         this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(event) }))
       }
+    })
+  }
+
+  /** Binary frames from the server (the tutor's voice). */
+  emitAudio(...frames: ArrayBuffer[]) {
+    act(() => {
+      for (const data of frames) this.onmessage?.(new MessageEvent('message', { data }))
     })
   }
 

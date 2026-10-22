@@ -21,7 +21,7 @@ export function SettingsPage() {
       <header className="flex flex-col gap-2">
         <h1 className="text-3xl font-semibold">Settings</h1>
         <p className="text-muted-foreground">
-          The model your tutor thinks with, how you learn, and how the app looks.
+          The model your tutor thinks with, its voice, how you learn, and how the app looks.
         </p>
       </header>
 
@@ -35,8 +35,8 @@ export function SettingsPage() {
 
       <Section
         icon={<AudioLines />}
-        title="Speech recognition"
-        description="Turns what you say into text, on your own machine: your voice never leaves it."
+        title="Voice"
+        description="Turns what you say into text, and the tutor's replies into speech, on your own machine: your voice never leaves it."
       >
         <SpeechSection />
       </Section>

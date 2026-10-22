@@ -8,6 +8,7 @@ import httpx2
 import pytest
 
 from vt_api.adapters.openai_stt import OpenAISpeechToText
+from vt_api.adapters.openai_tts import OpenAITextToSpeech
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.main import create_app
@@ -21,7 +22,8 @@ async def client(learner_service: LearnerService) -> AsyncIterator[httpx2.AsyncC
     container = Container(
         llm=create_autospec(LlmService, instance=True),
         learner=learner_service,
-        speech=create_autospec(OpenAISpeechToText, instance=True),
+        stt=create_autospec(OpenAISpeechToText, instance=True),
+        tts=create_autospec(OpenAITextToSpeech, instance=True),
     )
     app = create_app(Settings(_env_file=None), container=container)
     async with httpx2.AsyncClient(

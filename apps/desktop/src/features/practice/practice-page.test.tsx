@@ -1,10 +1,18 @@
 import { screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { FakeSocket, installFakeSocket } from '@/test/fake-socket'
 import { renderApp } from '@/test/render-app'
 
 import { reducer, sessionUrl } from './use-conversation'
+
+vi.mock('@/lib/audio/player', async () => {
+  const { FakePlayer } = await import('@/test/fake-audio')
+  return {
+    createVoicePlayer: (onPlayingChange: (playing: boolean) => void) =>
+      new FakePlayer(onPlayingChange),
+  }
+})
 
 const READY = {
   type: 'session.ready',
@@ -35,7 +43,7 @@ describe('Practice', () => {
     const { socket } = await openPractice()
 
     expect(socket.url).toBe('ws://localhost:8080/ws/session')
-    expect(socket.sent).toEqual([{ type: 'session.start', v: 1, topic: null }])
+    expect(socket.sent).toEqual([{ type: 'session.start', v: 1, topic: null, speak: true }])
     expect(screen.getByText('Level B1')).toBeInTheDocument()
     expect(screen.getByText('Ollama Cloud · gpt-oss:120b')).toBeInTheDocument()
   })
@@ -64,7 +72,14 @@ describe('Practice', () => {
         text: 'Nice! What did you do?',
         interrupted: false,
       },
-      { type: 'turn.metrics', v: 1, turn_id: 't1', first_token_ms: 820, reply_ms: 2140 },
+      {
+        type: 'turn.metrics',
+        v: 1,
+        turn_id: 't1',
+        first_token_ms: 820,
+        reply_ms: 2140,
+        first_audio_ms: null,
+      },
       {
         type: 'correction',
         v: 1,
@@ -98,7 +113,14 @@ describe('Practice', () => {
     socket.emit(
       { ...turn('I went to the beach'), source: 'voice', stt_ms: 640 },
       { type: 'assistant.text.done', v: 1, turn_id: 't1', text: 'Nice', interrupted: true },
-      { type: 'turn.metrics', v: 1, turn_id: 't1', first_token_ms: null, reply_ms: 300 },
+      {
+        type: 'turn.metrics',
+        v: 1,
+        turn_id: 't1',
+        first_token_ms: null,
+        reply_ms: 300,
+        first_audio_ms: null,
+      },
       {
         type: 'correction',
         v: 1,

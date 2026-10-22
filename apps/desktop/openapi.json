@@ -8,6 +8,75 @@
         ],
         "type": "string"
       },
+      "AssistantAudioDone": {
+        "additionalProperties": false,
+        "description": "No more audio for this reply.",
+        "properties": {
+          "interrupted": {
+            "default": false,
+            "title": "Interrupted",
+            "type": "boolean"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "assistant.audio.done",
+            "default": "assistant.audio.done",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "interrupted"
+        ],
+        "title": "AssistantAudioDone",
+        "type": "object"
+      },
+      "AssistantAudioStarted": {
+        "additionalProperties": false,
+        "description": "The tutor's voice for this reply follows as binary frames: PCM16 little-endian, mono, at\n`sample_rate`, sentence by sentence as the reply is generated.",
+        "properties": {
+          "sample_rate": {
+            "title": "Sample Rate",
+            "type": "integer"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "assistant.audio.started",
+            "default": "assistant.audio.started",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "sample_rate"
+        ],
+        "title": "AssistantAudioStarted",
+        "type": "object"
+      },
       "AssistantTextDelta": {
         "additionalProperties": false,
         "properties": {
@@ -98,13 +167,17 @@
             "input.interrupt": "#/components/schemas/InputInterrupt",
             "input.text": "#/components/schemas/InputText",
             "session.end": "#/components/schemas/SessionEnd",
-            "session.start": "#/components/schemas/SessionStart"
+            "session.start": "#/components/schemas/SessionStart",
+            "session.update": "#/components/schemas/SessionUpdate"
           },
           "propertyName": "type"
         },
         "oneOf": [
           {
             "$ref": "#/components/schemas/SessionStart"
+          },
+          {
+            "$ref": "#/components/schemas/SessionUpdate"
           },
           {
             "$ref": "#/components/schemas/InputText"
@@ -300,6 +373,7 @@
           "not_started",
           "llm_failed",
           "stt_failed",
+          "tts_failed",
           "no_speech",
           "audio_too_short",
           "audio_too_long"
@@ -571,6 +645,47 @@
         "title": "ModelList",
         "type": "object"
       },
+      "ModelStatus": {
+        "additionalProperties": false,
+        "description": "Whether one speech server answers and has its model.",
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "model_ready": {
+            "title": "Model Ready",
+            "type": "boolean"
+          },
+          "reachable": {
+            "title": "Reachable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "base_url",
+          "model",
+          "reachable",
+          "model_ready"
+        ],
+        "title": "ModelStatus",
+        "type": "object"
+      },
       "ProblemDetail": {
         "additionalProperties": false,
         "description": "Error body (`{\"detail\": ...}`), as FastAPI's `HTTPException` renders it.",
@@ -777,6 +892,8 @@
       "ServerEvent": {
         "discriminator": {
           "mapping": {
+            "assistant.audio.done": "#/components/schemas/AssistantAudioDone",
+            "assistant.audio.started": "#/components/schemas/AssistantAudioStarted",
             "assistant.text.delta": "#/components/schemas/AssistantTextDelta",
             "assistant.text.done": "#/components/schemas/AssistantTextDone",
             "correction": "#/components/schemas/Correction",
@@ -799,6 +916,12 @@
           },
           {
             "$ref": "#/components/schemas/AssistantTextDone"
+          },
+          {
+            "$ref": "#/components/schemas/AssistantAudioStarted"
+          },
+          {
+            "$ref": "#/components/schemas/AssistantAudioDone"
           },
           {
             "$ref": "#/components/schemas/Correction"
@@ -875,6 +998,11 @@
         "additionalProperties": false,
         "description": "Begin a conversation. Level and explanation language come from the learner profile.",
         "properties": {
+          "speak": {
+            "default": false,
+            "title": "Speak",
+            "type": "boolean"
+          },
           "topic": {
             "anyOf": [
               {
@@ -904,47 +1032,54 @@
         "required": [
           "v",
           "type",
-          "topic"
+          "topic",
+          "speak"
         ],
         "title": "SessionStart",
+        "type": "object"
+      },
+      "SessionUpdate": {
+        "additionalProperties": false,
+        "description": "Change session options. Applies from the next reply: to silence the current one, the\nclient stops playing it.",
+        "properties": {
+          "speak": {
+            "title": "Speak",
+            "type": "boolean"
+          },
+          "type": {
+            "const": "session.update",
+            "default": "session.update",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "speak"
+        ],
+        "title": "SessionUpdate",
         "type": "object"
       },
       "SpeechStatus": {
         "additionalProperties": false,
         "properties": {
-          "base_url": {
-            "title": "Base Url",
-            "type": "string"
+          "recognition": {
+            "$ref": "#/components/schemas/ModelStatus"
           },
-          "detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Detail"
-          },
-          "model": {
-            "title": "Model",
-            "type": "string"
-          },
-          "model_ready": {
-            "title": "Model Ready",
-            "type": "boolean"
-          },
-          "reachable": {
-            "title": "Reachable",
-            "type": "boolean"
+          "synthesis": {
+            "$ref": "#/components/schemas/ModelStatus"
           }
         },
         "required": [
-          "base_url",
-          "model",
-          "reachable",
-          "model_ready"
+          "recognition",
+          "synthesis"
         ],
         "title": "SpeechStatus",
         "type": "object"
@@ -1007,8 +1142,20 @@
       },
       "TurnMetrics": {
         "additionalProperties": false,
-        "description": "Latency of the tutor's reply, in milliseconds, from the learner's message (Phase 0).",
+        "description": "Latency of the tutor's reply, in milliseconds, from the learner's message (Phase 0).\n\nSent once the reply is complete, its audio included. For a spoken turn, the voice-to-voice\nlatency is `transcript.final.stt_ms + first_audio_ms`.",
         "properties": {
+          "first_audio_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "First Audio Ms"
+          },
           "first_token_ms": {
             "anyOf": [
               {
@@ -1046,7 +1193,8 @@
           "type",
           "turn_id",
           "first_token_ms",
-          "reply_ms"
+          "reply_ms",
+          "first_audio_ms"
         ],
         "title": "TurnMetrics",
         "type": "object"
@@ -1385,7 +1533,7 @@
     },
     "/v1/speech/status": {
       "get": {
-        "description": "Whether the speech-to-text server answers and has the configured model.",
+        "description": "Whether each speech server answers and has its model: speech-to-text for the learner's\nvoice, text-to-speech for the tutor's.",
         "operationId": "speech_status_v1_speech_status_get",
         "responses": {
           "200": {

@@ -136,7 +136,8 @@ export interface paths {
         };
         /**
          * Speech Status
-         * @description Whether the speech-to-text server answers and has the configured model.
+         * @description Whether each speech server answers and has its model: speech-to-text for the learner's
+         *     voice, text-to-speech for the tutor's.
          */
         get: operations["speech_status_v1_speech_status_get"];
         put?: never;
@@ -153,6 +154,52 @@ export interface components {
     schemas: {
         /** @enum {string} */
         ApiKeyPolicy: "required" | "optional";
+        /**
+         * AssistantAudioDone
+         * @description No more audio for this reply.
+         */
+        AssistantAudioDone: {
+            /**
+             * Interrupted
+             * @default false
+             */
+            interrupted: boolean;
+            /** Turn Id */
+            turn_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "assistant.audio.done";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
+        };
+        /**
+         * AssistantAudioStarted
+         * @description The tutor's voice for this reply follows as binary frames: PCM16 little-endian, mono, at
+         *     `sample_rate`, sentence by sentence as the reply is generated.
+         */
+        AssistantAudioStarted: {
+            /** Sample Rate */
+            sample_rate: number;
+            /** Turn Id */
+            turn_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "assistant.audio.started";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
+        };
         /** AssistantTextDelta */
         AssistantTextDelta: {
             /** Text */
@@ -196,7 +243,7 @@ export interface components {
         };
         /** @enum {string} */
         CefrLevel: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
-        ClientEvent: components["schemas"]["SessionStart"] | components["schemas"]["InputText"] | components["schemas"]["InputCommit"] | components["schemas"]["InputInterrupt"] | components["schemas"]["SessionEnd"];
+        ClientEvent: components["schemas"]["SessionStart"] | components["schemas"]["SessionUpdate"] | components["schemas"]["InputText"] | components["schemas"]["InputCommit"] | components["schemas"]["InputInterrupt"] | components["schemas"]["SessionEnd"];
         /**
          * ConnectionTestRequest
          * @description Body of `POST /v1/llm/test`.
@@ -265,7 +312,7 @@ export interface components {
         /** @enum {string} */
         CorrectionKind: "grammar" | "vocabulary" | "spelling" | "naturalness";
         /** @enum {string} */
-        ErrorCode: "bad_event" | "not_started" | "llm_failed" | "stt_failed" | "no_speech" | "audio_too_short" | "audio_too_long";
+        ErrorCode: "bad_event" | "not_started" | "llm_failed" | "stt_failed" | "tts_failed" | "no_speech" | "audio_too_short" | "audio_too_long";
         /** ErrorEvent */
         ErrorEvent: {
             code: components["schemas"]["ErrorCode"];
@@ -412,6 +459,22 @@ export interface components {
             models: string[];
         };
         /**
+         * ModelStatus
+         * @description Whether one speech server answers and has its model.
+         */
+        ModelStatus: {
+            /** Base Url */
+            base_url: string;
+            /** Detail */
+            detail?: string | null;
+            /** Model */
+            model: string;
+            /** Model Ready */
+            model_ready: boolean;
+            /** Reachable */
+            reachable: boolean;
+        };
+        /**
          * ProblemDetail
          * @description Error body (`{"detail": ...}`), as FastAPI's `HTTPException` renders it.
          */
@@ -489,7 +552,7 @@ export interface components {
             /** Model */
             model: string;
         };
-        ServerEvent: components["schemas"]["SessionReady"] | components["schemas"]["TranscriptFinal"] | components["schemas"]["AssistantTextDelta"] | components["schemas"]["AssistantTextDone"] | components["schemas"]["Correction"] | components["schemas"]["TurnMetrics"] | components["schemas"]["ErrorEvent"];
+        ServerEvent: components["schemas"]["SessionReady"] | components["schemas"]["TranscriptFinal"] | components["schemas"]["AssistantTextDelta"] | components["schemas"]["AssistantTextDone"] | components["schemas"]["AssistantAudioStarted"] | components["schemas"]["AssistantAudioDone"] | components["schemas"]["Correction"] | components["schemas"]["TurnMetrics"] | components["schemas"]["ErrorEvent"];
         /** SessionEnd */
         SessionEnd: {
             /**
@@ -529,6 +592,11 @@ export interface components {
          */
         SessionStart: {
             /**
+             * Speak
+             * @default false
+             */
+            speak: boolean;
+            /**
              * Topic
              * @default null
              */
@@ -545,18 +613,30 @@ export interface components {
              */
             v: 1;
         };
+        /**
+         * SessionUpdate
+         * @description Change session options. Applies from the next reply: to silence the current one, the
+         *     client stops playing it.
+         */
+        SessionUpdate: {
+            /** Speak */
+            speak: boolean;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "session.update";
+            /**
+             * V
+             * @default 1
+             * @constant
+             */
+            v: 1;
+        };
         /** SpeechStatus */
         SpeechStatus: {
-            /** Base Url */
-            base_url: string;
-            /** Detail */
-            detail?: string | null;
-            /** Model */
-            model: string;
-            /** Model Ready */
-            model_ready: boolean;
-            /** Reachable */
-            reachable: boolean;
+            recognition: components["schemas"]["ModelStatus"];
+            synthesis: components["schemas"]["ModelStatus"];
         };
         /**
          * TranscriptFinal
@@ -592,8 +672,16 @@ export interface components {
         /**
          * TurnMetrics
          * @description Latency of the tutor's reply, in milliseconds, from the learner's message (Phase 0).
+         *
+         *     Sent once the reply is complete, its audio included. For a spoken turn, the voice-to-voice
+         *     latency is `transcript.final.stt_ms + first_audio_ms`.
          */
         TurnMetrics: {
+            /**
+             * First Audio Ms
+             * @default null
+             */
+            first_audio_ms: number | null;
             /** First Token Ms */
             first_token_ms: number | null;
             /** Reply Ms */
