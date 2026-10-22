@@ -1,0 +1,172 @@
+/*
+ * Design tokens and base styles (Tailwind CSS v4 + shadcn/ui variables).
+ *
+ * Palette: violet for imagination and learning, cyan/teal for clear communication and trust,
+ * over a deep-indigo "night sky" in dark mode and a lavender-tinted white in light mode.
+ * Colours are OKLCH. Every text pair meets WCAG AA (4.5:1): foreground ~17:1, muted text
+ * ≥5.8:1, primary buttons ≥5.6:1, status colours ≥4.9:1, in both themes.
+ *
+ * Theme: `.dark` on <html> (src/lib/theme.ts) follows the OS unless the user picks one.
+ */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/space-grotesk';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+  --radius: 0.875rem;
+
+  --background: oklch(0.985 0.006 286);
+  --foreground: oklch(0.22 0.035 285);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.035 285);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.035 285);
+  --primary: oklch(0.53 0.23 292);
+  --primary-foreground: oklch(0.985 0.007 290);
+  --secondary: oklch(0.955 0.016 288);
+  --secondary-foreground: oklch(0.3 0.06 288);
+  --muted: oklch(0.96 0.01 286);
+  --muted-foreground: oklch(0.5 0.035 286);
+  --accent: oklch(0.945 0.03 292);
+  --accent-foreground: oklch(0.3 0.08 292);
+  --destructive: oklch(0.56 0.21 22);
+  --border: oklch(0.9 0.018 286);
+  --input: oklch(0.9 0.018 286);
+  --ring: oklch(0.6 0.2 292);
+
+  /* Brand extras */
+  --highlight: oklch(0.52 0.09 205);
+  --success: oklch(0.52 0.115 160);
+  --warning: oklch(0.55 0.13 65);
+  --glow-1: oklch(0.75 0.15 292 / 0.22);
+  --glow-2: oklch(0.8 0.11 205 / 0.2);
+
+  --sidebar: oklch(0.975 0.01 286 / 0.8);
+  --sidebar-foreground: oklch(0.3 0.04 286);
+  --sidebar-accent: oklch(0.935 0.035 292);
+  --sidebar-accent-foreground: oklch(0.3 0.1 292);
+  --sidebar-border: oklch(0.9 0.018 286);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: oklch(0.16 0.028 284);
+  --foreground: oklch(0.965 0.008 286);
+  --card: oklch(0.2 0.032 284);
+  --card-foreground: oklch(0.965 0.008 286);
+  --popover: oklch(0.2 0.032 284);
+  --popover-foreground: oklch(0.965 0.008 286);
+  --primary: oklch(0.72 0.155 294);
+  --primary-foreground: oklch(0.17 0.04 288);
+  --secondary: oklch(0.26 0.04 286);
+  --secondary-foreground: oklch(0.93 0.012 286);
+  --muted: oklch(0.24 0.03 285);
+  --muted-foreground: oklch(0.72 0.03 286);
+  --accent: oklch(0.28 0.06 292);
+  --accent-foreground: oklch(0.95 0.02 292);
+  --destructive: oklch(0.7 0.18 22);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.72 0.155 294);
+
+  --highlight: oklch(0.8 0.12 200);
+  --success: oklch(0.76 0.14 160);
+  --warning: oklch(0.82 0.13 75);
+  --glow-1: oklch(0.55 0.2 292 / 0.28);
+  --glow-2: oklch(0.6 0.13 205 / 0.18);
+
+  --sidebar: oklch(0.18 0.03 284 / 0.75);
+  --sidebar-foreground: oklch(0.85 0.02 286);
+  --sidebar-accent: oklch(0.28 0.06 292);
+  --sidebar-accent-foreground: oklch(0.97 0.01 292);
+  --sidebar-border: oklch(1 0 0 / 8%);
+}
+
+@theme inline {
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Space Grotesk Variable', 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+
+  --animate-voice-wave: voice-wave 1.6s ease-in-out infinite;
+  @keyframes voice-wave {
+    0%,
+    100% {
+      transform: scaleY(0.25);
+    }
+    50% {
+      transform: scaleY(1);
+    }
+  }
+
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 4px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-highlight: var(--highlight);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground min-h-dvh font-sans antialiased;
+    /* Two soft light sources behind the app: static gradients, so they cost no animation work. */
+    background-image:
+      radial-gradient(60rem 40rem at 10% -10%, var(--glow-1), transparent 60%),
+      radial-gradient(50rem 36rem at 110% 10%, var(--glow-2), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-display tracking-tight;
+  }
+}
+
+@utility text-gradient {
+  background-image: linear-gradient(
+    120deg,
+    var(--primary) 0%,
+    color-mix(in oklch, var(--primary), var(--highlight)) 55%,
+    var(--highlight) 100%
+  );
+  background-clip: text;
+  color: transparent;
+}

@@ -9,7 +9,7 @@ Every change reaches `develop` (and later `master`) through a pull request whose
 | `ci.yml` | every PR; push to `master` / `develop` | **Commit messages** | commitlint over every commit in the PR (PRs only) |
 | | | **Hygiene** | the repository-wide pre-commit hooks (whitespace, YAML/TOML/JSON, large files, private keys, `uv.lock` up to date, ruff, zizmor on the workflows) |
 | | | **Python** | ruff, mypy `--strict`, import-linter contracts, pytest with **≥ 97 %** coverage |
-| | | **UI** | ESLint (type-aware), `tsc`, Prettier, Vitest with **≥ 97 %** coverage, production build |
+| | | **UI** | ESLint (type-aware), `tsc`, Prettier, Vitest with **≥ 97 %** coverage, production build; generated code up to date (`just types` and the route tree must not change) |
 | | | **Desktop** (Ubuntu + Windows) | `cargo fmt`, clippy pedantic `-D warnings`, `cargo test` under cargo-llvm-cov with **≥ 97 %** coverage |
 | | | **Docker** | `compose.yaml` valid for every profile; `api` and `pron` images build |
 | | | **CI ok** | aggregate: fails if any job above failed or was cancelled. **The check branch protection requires** |

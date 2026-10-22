@@ -1,4 +1,8 @@
 /// <reference types="vitest/config" />
+import { fileURLToPath } from 'node:url'
+
+import tailwindcss from '@tailwindcss/vite'
+import { tanstackRouter } from '@tanstack/router-plugin/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
@@ -7,7 +11,20 @@ const host = process.env.TAURI_DEV_HOST
 
 // https://v2.tauri.app/start/frontend/vite/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    tailwindcss(),
+    // Generates the route tree from src/routes and splits each page into its own chunk.
+    // Must run before the React plugin. Tests load routes unsplit, so coverage maps to source.
+    tanstackRouter({
+      target: 'react',
+      autoCodeSplitting: !process.env.VITEST,
+      generatedRouteTree: './src/generated/routeTree.gen.ts',
+    }),
+    react(),
+  ],
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
   // Keep Rust compiler errors visible in the `tauri dev` terminal.
   clearScreen: false,
   server: {
@@ -36,7 +53,7 @@ export default defineConfig({
         'src/test/**',
         'src/**/*.test.{ts,tsx}',
         'src/**/*.d.ts',
-        // Generated from vt_contracts (`just types`), covered by the Python contract tests.
+        // Generated: API types (`just types`) and the route tree (TanStack Router plugin).
         'src/generated/**',
       ],
       // A floor, not a target: never lower it to make a build pass (docs/development.md#testing).
