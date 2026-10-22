@@ -63,7 +63,7 @@ Run `just` to list them. The Docker profile comes from `VT_PROFILE` in `.env` (d
 | `just test` | pytest, Vitest and cargo test, each **failing under 97 % coverage** (`test-py`, `test-ui`, `test-rust`) |
 | `just test-fast` | The three suites without coverage (what the pre-push hook runs) |
 | `just security` | `uv audit` + `pnpm audit` + Trivy (CI policy in `trivy.yaml`): known vulnerabilities, secrets, Dockerfiles. Needs [Trivy](https://trivy.dev) installed |
-| `just types` | Regenerate `apps/desktop/src/generated` from `vt_contracts` *(Phase 1)* |
+| `just types` | Regenerate the UI's API types: the api's OpenAPI schema (`vt-api-openapi`, no server needed) → `apps/desktop/openapi.json` → `src/generated/api.d.ts` (openapi-typescript). With the api running, `pnpm --filter @voice-tutor/desktop types:live` reads `/openapi.json` from it instead |
 | `just dev` | `pron` and the profile's model services in Docker; `api` (uvicorn --reload) and the UI (Vite, http://localhost:1420) locally |
 | `just dev-api` / `just dev-ui` | One half of `just dev` |
 | `just desktop` | `tauri dev` window (it starts its own Vite on :1420, so do not combine it with `just dev`; run `just models` + `just dev-api`, or `just up`, for the backend) |
@@ -75,7 +75,7 @@ Run `just` to list them. The Docker profile comes from `VT_PROFILE` in `.env` (d
 
 `just dev` vs `just watch`: `dev` runs the api on your machine with instant reload and a debugger-friendly process; `watch` runs exactly the production images and rebuilds them on change (a few seconds, thanks to the uv and pnpm cache mounts).
 
-CI (`.github/workflows/ci.yml`) runs `just check-*` and `just test-*` per stack, Rust on Ubuntu **and Windows**, and builds both Docker images; `security.yml` and `codeql.yml` scan dependencies, secrets and code. What each job enforces, how it maps to the git hooks, and the branch protection: [.github/README.md](../.github/README.md). From Phase 1 CI also fails if `just types` or the README results block would change (generated files must be committed up to date).
+CI (`.github/workflows/ci.yml`) runs `just check-*` and `just test-*` per stack, Rust on Ubuntu **and Windows**, and builds both Docker images; `security.yml` and `codeql.yml` scan dependencies, secrets and code. What each job enforces, how it maps to the git hooks, and the branch protection: [.github/README.md](../.github/README.md). CI also fails if `just types` or the TanStack Router route tree would change, and from Phase 2 if the README results block would (generated files must be committed up to date).
 
 ### Desktop app notes
 

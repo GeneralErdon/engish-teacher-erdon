@@ -74,6 +74,7 @@ voice-tutor/
 │   │   ├── pyproject.toml
 │   │   ├── src/vt_api/
 │   │   │   ├── __main__.py      # `vt-api`: uvicorn configured from Settings
+│   │   │   ├── openapi.py       # `vt-api-openapi`: write the OpenAPI schema without a server
 │   │   │   ├── main.py          # app factory, lifespan, router wiring, UI static files
 │   │   │   ├── config.py        # Settings (pydantic-settings)
 │   │   │   ├── container.py     # dependency wiring: ports → adapters
@@ -125,15 +126,26 @@ voice-tutor/
 │       ├── package.json
 │       ├── app-icon.svg         # source for `tauri icon`
 │       ├── eslint.config.ts / vite.config.ts / tsconfig*.json
+│       ├── components.json      # shadcn/ui CLI settings
+│       ├── openapi.json         # the api's OpenAPI schema (`just types`; CI checks it is current)
 │       ├── src/
-│       │   ├── app/             # routing, layout, theme (follows OS light/dark)
+│       │   ├── styles.css       # Tailwind 4 + design tokens (OKLCH, light/dark)
+│       │   ├── app/             # providers, router (hash history), query client, motion features
+│       │   ├── routes/          # file-based routes: __root (app shell), index (Home), settings
+│       │   ├── components/
+│       │   │   ├── ui/          # shadcn/ui components (Radix), owned and edited here
+│       │   │   └── layout/      # sidebar (desktop) and tab bar (phone), animated highlight
 │       │   ├── features/
+│       │   │   ├── home/        # welcome + status of the backend and the model
+│       │   │   ├── status/      # api health polling
 │       │   │   ├── conversation/# talk screen, live transcript, corrections
 │       │   │   ├── drills/      # pronunciation practice with phoneme highlighting
 │       │   │   ├── notes/       # Markdown notes list + viewer
 │       │   │   ├── progress/    # charts, weak phonemes, streak
-│       │   │   └── settings/    # backend URL, devices, voice
+│       │   │   └── settings/    # language model (providers, keys, test), appearance, backend
 │       │   ├── lib/
+│       │   │   ├── api/         # openapi-fetch client + typed TanStack Query hooks, ApiError
+│       │   │   ├── theme.ts     # system / light / dark, stored per device
 │       │   │   ├── ws/          # typed WS client (uses generated types)
 │       │   │   ├── audio/
 │       │   │   │   ├── source.ts          # AudioSource interface
@@ -141,7 +153,7 @@ voice-tutor/
 │       │   │   │   ├── nativeSource.ts    # Tauri events from Rust capture (fallback)
 │       │   │   │   └── player.ts          # 24 kHz PCM playback queue, barge-in stop
 │       │   │   └── platform.ts  # isTauri(), backend URL resolution
-│       │   └── generated/       # TS types from JSON Schema (do not edit)
+│       │   └── generated/       # api.d.ts (from openapi.json) and routeTree.gen.ts (do not edit)
 │       ├── src-tauri/           # Rust: Tauri 2 app
 │       │   ├── Cargo.toml
 │       │   ├── tauri.conf.json
@@ -158,7 +170,7 @@ voice-tutor/
 │   ├── run_latency_eval.py
 │   └── results/latest.json
 ├── scripts/
-│   ├── gen_ts_types.py          # contracts → JSON Schema → apps/desktop/src/generated
+│   ├── gen_ts_types.py          # WS event types (OpenAPI does not describe WebSocket messages)
 │   └── render_results.py        # results JSON → README table
 └── data/                        # runtime bind mount (gitignored): notes/, progress.db. Model caches use Docker named volumes
 ```
@@ -253,3 +265,4 @@ The same code ships in two forms. Only *who starts the processes* changes: the a
 | 6 | uv workspace monorepo (+ pnpm workspace for the UI) | One lockfile per ecosystem, shared tooling, fast installs | Poetry / separate repos |
 | 7 | `just` as the task runner | Runs natively on Windows (PowerShell) as well as Linux/macOS; installs without admin rights (`uv tool install rust-just`) | Make (no native Windows), npm scripts (Node-only) |
 | 8 | Two distributions of one codebase: Docker Compose (server) and, from Phase 4, a desktop installer that runs the backend as Tauri sidecars ([Distribution](#distribution)) | One-click install for learners; Docker keeps hardware profiles and the home-lab case; Vulkan builds cover every GPU vendor without per-vendor images; native Metal on macOS | Desktop-only bundle (loses the home-lab case), Docker-only (too hard for learners), the app driving `docker compose` (still needs Docker) |
+| 9 | UI: TanStack Router (file routes, code split per page) + TanStack Query over a client generated from the api's OpenAPI schema (`openapi-fetch` + `openapi-react-query`); react-hook-form + zod; shadcn/ui (Radix) + Tailwind 4; `motion` loaded lazily (`LazyMotion`) | One source of truth for API types, from the Pydantic models to the hooks; accessible primitives without a component library to fight; animations that cost nothing until first paint and respect reduced motion | Hand-written fetch types, Redux, MUI/Chakra, CSS-in-JS |

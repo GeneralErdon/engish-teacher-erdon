@@ -16,8 +16,8 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 - [ ] (done in bootstrap) uv workspace, tooling, pre-commit, CI skeleton
 - [ ] `vt_contracts` WS protocol + generated TS types
 - [ ] `api`: settings, container, ports, OpenAI-compatible adapters, health checks
-- [ ] Chat model providers chosen from the UI: Ollama (local and cloud), OpenAI, Anthropic, Gemini, and any OpenAI- or Anthropic-compatible endpoint. API keys stay in the api and never come back to the UI
-- [ ] UI shell: responsive navigation, Home (welcome + status), Settings, light/dark theme, typed API client generated from the api's OpenAPI schema
+- [x] Chat model providers chosen from the UI: Ollama (local and cloud), OpenAI, Anthropic, Gemini, and any OpenAI- or Anthropic-compatible endpoint. API keys stay in the api and never come back to the UI (2026-10-21)
+- [x] UI shell: responsive navigation, Home (welcome + status), Settings, light/dark theme, typed API client generated from the api's OpenAPI schema (2026-10-21)
 - [ ] Desktop: configurable backend URL (for a home-lab server) and a "backend unavailable" screen with the next step to take
 - [ ] Realtime session: VAD, turn-taking, sentence-streamed TTS, barge-in cancellation
 - [ ] Teacher: level-aware conversation + structured corrections

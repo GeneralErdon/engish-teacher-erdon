@@ -217,9 +217,10 @@ All settings live in `.env`, starting from [`.env.example`](.env.example). They 
 | Variable | Default | Description |
 |---|---|---|
 | `VT_PROFILE` | `cpu` | Hardware profile (see below). |
-| `VT_LLM_BASE_URL` | `http://llm:8080/v1` | Any OpenAI-compatible chat endpoint. |
+| `VT_LLM_PROVIDER` | `openai_compatible` | `ollama`, `ollama_cloud`, `openai`, `anthropic`, `gemini`, `openai_compatible` or `anthropic_compatible`. Easier: pick it in the app under **Settings → Language model**, which wins over these variables ([details](docs/configuration.md#chat-model-providers)). |
+| `VT_LLM_BASE_URL` | `http://llm:8080/v1` | The provider's base URL. |
 | `VT_LLM_MODEL` | `gemma-3-4b-it-q4` | Model name as the endpoint expects it (`gemma-3-12b-it-q4` on a 12–16 GB GPU). |
-| `VT_LLM_API_KEY` | *(empty)* | Only for cloud providers. |
+| `VT_LLM_API_KEY` | *(empty)* | For providers that need one. Keys saved in the app stay in the backend (`data/settings.json`, mode `0600`). |
 | `VT_LLM_HF_REPO` | `ggml-org/gemma-3-4b-it-GGUF` | GGUF that llama.cpp downloads (`cpu` / `amd` profiles). |
 | `VT_STT_BASE_URL` | `http://stt:8000/v1` | Speech-to-text endpoint. |
 | `VT_STT_MODEL` | `large-v3-turbo` | Whisper variant (`.env.example` uses `small.en` for CPU). |
