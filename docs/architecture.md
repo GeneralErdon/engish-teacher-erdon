@@ -217,6 +217,25 @@ Tensor shapes are typed with `jaxtyping` and checked at runtime in tests (`beart
 - **SQLite** (`data/progress.db`) for sessions, turns, corrections and phoneme stats. It is a single-user app, so SQLite is the right tool: zero ops and trivially backed up.
 - **Markdown notes** (`data/notes/*.md`) with YAML front matter, one per session, plus a generated `progress.md`. They are human-readable, Obsidian-compatible, and rendered in the UI with `react-markdown` + `remark-gfm` + `rehype-sanitize` (sanitised: notes include model output).
 
+## Distribution
+
+The same code ships in two forms. Only *who starts the processes* changes: the api reaches every model through a URL from its settings and never assumes Docker.
+
+| Form | For | What runs where | Status |
+|---|---|---|---|
+| **Server** (Docker Compose) | Self-hosters, home labs, a GPU machine serving other devices | `api`, `pron` and the model servers in containers, hardware picked with `--profile`. The UI is served by the api (browser, phone over HTTPS) or used through the desktop app as a client | Phase 1 |
+| **Desktop client** | Anyone with a server already running | The installer contains only the Tauri window and the UI; it connects to a server | Today (installers from Phase 3) |
+| **Desktop all-in-one** | Learners who should never see Docker or a terminal | The app starts the model servers and the api as **Tauri sidecars**, downloads the models on first run with a progress bar, and stops everything on exit | Phase 4 |
+
+**Why both.** Docker solves the hardware matrix (CPU, CUDA, ROCm, Vulkan) and the home-lab case, but asks a learner to install Docker. On Windows that also means WSL2. Desktop AI apps that "just work" bundle their engines instead: Jan (Tauri) and LM Studio ship llama.cpp and download models in-app; AnythingLLM publishes Desktop and Docker editions of one codebase. The all-in-one form also fixes the two cases Docker handles worst: **macOS** (no GPU in Docker, so Metal only works natively) and **Windows with an AMD GPU**.
+
+**Rules this sets for earlier phases**, so Phase 4 stays packaging work and not a rewrite:
+- Prefer components that ship as native binaries or run on ONNX Runtime: llama.cpp and whisper.cpp (one Vulkan build covers AMD, NVIDIA and Intel), Kokoro ONNX, and the wav2vec2 phoneme model exported to ONNX. Torch may be used to export or evaluate models, not at runtime.
+- Every model endpoint and data path comes from `Settings`; nothing in the api assumes container hostnames or `/data`.
+- The desktop app talks to its backend through one configurable URL, so "client of a server" and "all-in-one" are the same UI.
+
+**Not doing:** a button that runs `docker compose` from the app. It still requires Docker (and WSL2 on Windows), which is the barrier the all-in-one form removes.
+
 ## Architecture decisions (summary)
 
 | # | Decision | Why | Alternative rejected |
@@ -229,3 +248,4 @@ Tensor shapes are typed with `jaxtyping` and checked at runtime in tests (`beart
 | 5 | SQLite + Markdown | Single user, zero ops, human-readable notes | Postgres |
 | 6 | uv workspace monorepo (+ pnpm workspace for the UI) | One lockfile per ecosystem, shared tooling, fast installs | Poetry / separate repos |
 | 7 | `just` as the task runner | Runs natively on Windows (PowerShell) as well as Linux/macOS; installs without admin rights (`uv tool install rust-just`) | Make (no native Windows), npm scripts (Node-only) |
+| 8 | Two distributions of one codebase: Docker Compose (server) and, from Phase 4, a desktop installer that runs the backend as Tauri sidecars ([Distribution](#distribution)) | One-click install for learners; Docker keeps hardware profiles and the home-lab case; Vulkan builds cover every GPU vendor without per-vendor images; native Metal on macOS | Desktop-only bundle (loses the home-lab case), Docker-only (too hard for learners), the app driving `docker compose` (still needs Docker) |

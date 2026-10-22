@@ -208,6 +208,8 @@ just bundle
 
 Output goes to `apps/desktop/src-tauri/target/release/bundle/`: `.deb`, `.rpm` and `.AppImage` on Linux; `.msi` and `.exe` (NSIS) on Windows. The app talks to the backend at `http://localhost:8080`, so start it with Docker or `just dev-api` first.
 
+Today the desktop app is a **client**: the installer contains the window and the UI, not the models. An all-in-one installer is planned for Phase 4: it starts the backend by itself and downloads the models on first run, with no Docker ([why and how](docs/architecture.md#distribution)).
+
 ## Configuration
 
 All settings live in `.env`, starting from [`.env.example`](.env.example). They are validated at startup, so a service refuses to boot with a clear message if something is wrong.
