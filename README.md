@@ -1,5 +1,13 @@
 # voice-tutor
 
+[![CI](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/codeql.yml/badge.svg?branch=develop)](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/codeql.yml)
+[![Security](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/security.yml/badge.svg?branch=develop)](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/security.yml)
+[![codecov](https://codecov.io/gh/GeneralErdon/engish-teacher-erdon/branch/develop/graph/badge.svg)](https://codecov.io/gh/GeneralErdon/engish-teacher-erdon)
+![coverage floor](https://img.shields.io/badge/coverage%20floor-97%25-brightgreen)
+![Python 3.14](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white)
+![Tauri 2](https://img.shields.io/badge/tauri-2-24C8DB?logo=tauri&logoColor=white)
+
 > A private, self-hosted **English speaking coach**. Talk to it by voice, get grammar corrections, and practise pronunciation with **phoneme-level feedback**, all on your own machine.
 
 Your audio never leaves your computer. No accounts, no telemetry, no subscriptions.
@@ -244,7 +252,7 @@ Run `just` to list everything. The main recipes:
 | `just setup` | Install every dependency (uv, pnpm) and the git hooks |
 | `just fmt` | Format Python, TypeScript and Rust |
 | `just check` | ruff, mypy --strict, import-linter, ESLint, tsc, Prettier, cargo fmt, clippy |
-| `just test` | pytest (with coverage), Vitest, cargo test |
+| `just test` | pytest, Vitest, cargo test; each fails under **97 % coverage** |
 | `just dev` | Models in Docker + api and UI locally |
 | `just dev-api` / `just dev-ui` | One half of `just dev` |
 | `just desktop` | Tauri dev window |
@@ -252,7 +260,7 @@ Run `just` to list everything. The main recipes:
 | `just up [profile]` / `just watch [profile]` / `just down` | Full stack in Docker / with Compose Watch / stop it |
 | `just eval` | Evaluations and README results table *(Phase 2)* |
 
-CI (`.github/workflows/ci.yml`) runs the same `check` and `test` recipes on every push and pull request, compiles the desktop shell on Ubuntu **and Windows**, and builds both Docker images.
+CI runs the same `check` and `test` recipes on every pull request and every push to `master`/`develop`, compiles the desktop shell on Ubuntu **and Windows**, builds both Docker images, and scans dependencies, secrets and code (Trivy, CodeQL, dependency review). Everything that runs, what blocks a merge, and how it maps to the git hooks: [.github/README.md](.github/README.md).
 
 ## Project layout
 
@@ -305,7 +313,7 @@ What is measured:
 
 ## Contributing
 
-Git flow: `master` holds releases, `develop` is the integration branch, and every change gets its own `feat/<name>` or `fix/<name>` branch from `develop`, merged back by pull request with CI green ([details](docs/development.md#branches-and-commits-git-flow)). Conventional Commits (`feat:`, `fix:`, `docs:`…), small PRs with tests, and `just check test` green before pushing; the pre-commit hooks installed by `just setup` catch most issues on commit. Architecture changes get a short ADR in [docs/architecture.md](docs/architecture.md#architecture-decisions-summary).
+See [CONTRIBUTING.md](CONTRIBUTING.md) (setup, branches, commits, tests) and [SECURITY.md](SECURITY.md) for reporting vulnerabilities. In short: git flow: `master` holds releases, `develop` is the integration branch, and every change gets its own `feat/<name>` or `fix/<name>` branch from `develop`, merged back by pull request with CI green ([details](docs/development.md#branches-and-commits-git-flow)). Conventional Commits (`feat:`, `fix:`, `docs:`…), small PRs with tests, and `just check test` green before pushing; the pre-commit hooks installed by `just setup` catch most issues on commit. Architecture changes get a short ADR in [docs/architecture.md](docs/architecture.md#architecture-decisions-summary).
 
 ## Privacy
 

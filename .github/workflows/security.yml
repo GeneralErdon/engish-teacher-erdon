@@ -1,0 +1,87 @@
+# Supply-chain and secret scanning. Findings go to the repository's Security tab (SARIF).
+# Policy (severities, ignores) lives in trivy.yaml, never here: trivy-action turns each `with:`
+# input into an environment variable that overrides the config file.
+name: Security
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays: new CVEs in dependencies that did not change
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  trivy:
+    name: Trivy · Cargo.lock, secrets, Dockerfiles
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to the Security tab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan the repository (Cargo.lock, secrets, Dockerfiles)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          trivy-config: trivy.yaml
+          format: sarif
+          output: trivy-results.sarif
+      - name: Upload to the Security tab
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
+
+  # Trivy cannot read these lockfiles (uv's virtual workspace root, pnpm 12's two-document
+  # lockfile), so Python and JavaScript are audited with their own package managers.
+  audit:
+    name: Audit · uv (Python) and pnpm (JavaScript)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to the Security tab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: $/.github/actions/setup-python
+      - uses: $/.github/actions/setup-node
+      - name: uv audit (OSV database)
+        run: uv audit --locked --preview-features audit-command --output-format sarif > uv-audit.sarif
+      - name: Upload to the Security tab
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: uv-audit.sarif
+          category: uv-audit
+      - name: pnpm audit (high and critical)
+        if: ${{ !cancelled() }}
+        run: pnpm audit --audit-level high
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # summary comment when the review fails
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure

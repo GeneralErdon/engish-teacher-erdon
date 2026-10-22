@@ -1,0 +1,38 @@
+# Codecov: per-PR coverage comment and badge. The 97% floor itself is enforced by the test
+# runners (pytest-cov, Vitest, cargo-llvm-cov), so CI fails before uploading a regression.
+codecov:
+  require_ci_to_pass: true
+
+coverage:
+  precision: 2
+  round: down
+  range: "90...100"
+  status:
+    project:
+      default:
+        target: 97%
+        threshold: 0.5%
+    patch:
+      default:
+        target: 97%
+
+flag_management:
+  default_rules:
+    carryforward: true
+  individual_flags:
+    - name: python
+      paths: [packages/, services/]
+    - name: ui
+      paths: [apps/desktop/src/]
+    - name: rust
+      paths: [apps/desktop/src-tauri/src/]
+
+# Same exclusions as the runners (each one is justified next to its runner config).
+ignore:
+  - apps/desktop/src/main.tsx
+  - apps/desktop/src-tauri/src/main.rs
+  - apps/desktop/src-tauri/src/shell.rs
+
+comment:
+  layout: "condensed_header, diff, flags, files"
+  require_changes: false

@@ -15,6 +15,12 @@ LLM_DEV_URL := if PROFILE == "external" { replace(env("VT_LLM_BASE_URL", "http:/
 desktop := "@voice-tutor/desktop"
 tauri_manifest := "apps/desktop/src-tauri/Cargo.toml"
 
+# Coverage floor for every language. Never lower it to make a build pass (docs/development.md#testing).
+COVERAGE_MIN := "97"
+
+# Rust files that need a real window/webview: excluded from coverage (see src-tauri/src/shell.rs).
+rust_cov_ignore := "(main|shell)\\.rs$"
+
 [private]
 default:
     @just --list --unsorted
@@ -24,6 +30,7 @@ default:
 setup:
     uv sync --all-packages
     pnpm install
+    cargo install --locked cargo-llvm-cov
     uv run pre-commit install
 
 # Format Python, TypeScript and Rust
@@ -61,24 +68,40 @@ check-rust:
     cargo fmt --manifest-path {{ tauri_manifest }} --check
     cargo clippy --manifest-path {{ tauri_manifest }} --all-targets --locked -- -D warnings
 
-# Run every test suite
+# Run every test suite, each with its 97% coverage floor (what CI runs)
 [group('quality')]
 test: test-py test-ui test-rust
 
-# pytest (unit + integration) with coverage
+# pytest (unit + integration); fails under 97% coverage. Writes coverage.xml
 [group('quality')]
 test-py:
-    uv run pytest --cov --cov-report=term
+    uv run pytest --cov --cov-report=term-missing:skip-covered --cov-report=xml
 
-# Vitest
+# Vitest; fails under 97% coverage. Writes apps/desktop/coverage/ (lcov + html)
 [group('quality')]
 test-ui:
-    pnpm --filter {{ desktop }} test
+    pnpm --filter {{ desktop }} test:cov
 
-# cargo test (permission policy, audio framing)
+# cargo test under cargo-llvm-cov; fails under 97% coverage. Writes src-tauri/target/lcov.info
 [group('quality')]
 test-rust:
+    cargo llvm-cov --manifest-path {{ tauri_manifest }} --locked --no-report
+    cargo llvm-cov report --manifest-path {{ tauri_manifest }} --ignore-filename-regex '{{ rust_cov_ignore }}' --summary-only --fail-under-lines {{ COVERAGE_MIN }} --fail-under-functions {{ COVERAGE_MIN }} --fail-under-regions {{ COVERAGE_MIN }}
+    cargo llvm-cov report --manifest-path {{ tauri_manifest }} --ignore-filename-regex '{{ rust_cov_ignore }}' --lcov --output-path apps/desktop/src-tauri/target/lcov.info
+
+# Fast test run without coverage (used by the pre-push hook)
+[group('quality')]
+test-fast:
+    uv run pytest -q
+    pnpm --filter {{ desktop }} test
     cargo test --manifest-path {{ tauri_manifest }} --locked
+
+# Known vulnerabilities in every lockfile, secrets and Dockerfile issues (needs Trivy installed)
+[group('quality')]
+security:
+    uv audit --locked --preview-features audit-command
+    pnpm audit --audit-level high
+    trivy fs --config trivy.yaml .
 
 # Regenerate apps/desktop/src/generated from vt_contracts
 [group('quality')]

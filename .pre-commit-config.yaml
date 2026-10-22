@@ -1,6 +1,18 @@
-# Installed by `just setup` (uv run pre-commit install). Run everything: uv run pre-commit run -a
+# Git hooks (the Python-world husky). `just setup` installs all three stages:
+#
+#   pre-commit  fast: formatting, lint, secrets           (staged files)
+#   commit-msg  Conventional Commits via commitlint
+#   pre-push    slower: types, architecture, all tests    (skipped when no matching file changed)
+#
+# Run by hand: `uv run pre-commit run -a` (pre-commit stage) or
+# `uv run pre-commit run -a --hook-stage pre-push`. CI runs the same gates where they cannot be
+# skipped with --no-verify (.github/README.md has the full hooks-vs-CI table).
+#
 # Hooks marked `language: system` use the project's own toolchain (uv / pnpm / cargo), so their
 # versions always match the lockfiles.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+default_stages: [pre-commit]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -11,12 +23,21 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
       - id: check-yaml
-        args: [--allow-multiple-documents]  # pnpm-lock.yaml is multi-document
+        args: [--allow-multiple-documents] # pnpm-lock.yaml is multi-document
       - id: check-toml
+      - id: check-json
+        exclude: ^apps/desktop/tsconfig.*\.json$ # JSONC (comments)
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=1024]
       - id: detect-private-key
+      - id: no-commit-to-branch
+        args: [--branch, master, --branch, develop]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
 
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.13.3
@@ -30,20 +51,14 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.31.1
+    hooks:
+      - id: zizmor
+
   - repo: local
     hooks:
-      - id: mypy
-        name: mypy --strict
-        entry: uv run mypy packages/contracts/src services/api/src services/pron/src
-        language: system
-        types: [python]
-        pass_filenames: false
-      - id: import-linter
-        name: import-linter (layering contracts)
-        entry: uv run lint-imports
-        language: system
-        types: [python]
-        pass_filenames: false
+      # ---------------------------------------------------------------- pre-commit
       - id: eslint
         name: eslint
         entry: pnpm --filter @voice-tutor/desktop lint
@@ -63,3 +78,62 @@ repos:
         language: system
         files: ^apps/desktop/src-tauri/.*\.rs$
         pass_filenames: false
+
+      # ---------------------------------------------------------------- commit-msg
+      - id: commitlint
+        name: commitlint (Conventional Commits)
+        entry: pnpm exec commitlint --edit
+        language: system
+        stages: [commit-msg]
+
+      # ---------------------------------------------------------------- pre-push
+      - id: mypy
+        name: mypy --strict
+        entry: uv run mypy packages/contracts/src services/api/src services/pron/src
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]
+      - id: import-linter
+        name: import-linter (layering contracts)
+        entry: uv run lint-imports
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]
+      - id: pytest
+        name: pytest
+        entry: uv run pytest -q
+        language: system
+        files: ^(packages|services)/
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]
+      - id: tsc
+        name: tsc
+        entry: pnpm --filter @voice-tutor/desktop typecheck
+        language: system
+        files: ^apps/desktop/.*\.(ts|tsx)$
+        pass_filenames: false
+        stages: [pre-push]
+      - id: vitest
+        name: vitest
+        entry: pnpm --filter @voice-tutor/desktop test
+        language: system
+        files: ^apps/desktop/(src/|vite\.config\.ts|package\.json)
+        pass_filenames: false
+        stages: [pre-push]
+      - id: clippy
+        name: cargo clippy
+        entry: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+        language: system
+        files: ^apps/desktop/src-tauri/
+        pass_filenames: false
+        stages: [pre-push]
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
+        language: system
+        files: ^apps/desktop/src-tauri/
+        pass_filenames: false
+        stages: [pre-push]

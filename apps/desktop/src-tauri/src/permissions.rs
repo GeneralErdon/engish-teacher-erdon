@@ -1,65 +1,37 @@
-//! Microphone permission for the UI's `getUserMedia`.
+//! Microphone permission policy for the UI's `getUserMedia`.
 //!
 //! Before a page can capture media, the webview asks the app. WebKitGTK (Linux) silently *denies*
-//! when the app does not answer, so the UI would never hear the learner. The policy here:
+//! when the app does not answer, so the UI would never hear the learner. The policy:
 //!
 //! - **Microphone**: allowed, only for the app's own origins: the bundled UI and, in debug
 //!   builds, the Vite dev server (`build.devUrl`).
 //! - **Everything else** (camera, screen capture, geolocation, notifications...): denied.
 //!
-//! It uses Tauri's cross-platform `Builder::on_permission_request` (WebKitGTK's
-//! `permission-request` signal on Linux, `PermissionRequested` on WebView2, `WKUIDelegate` on
-//! macOS), so every OS gets the same rules. On Linux, [`setup`] also turns on WebKitGTK's
-//! `enable-media-stream` setting, which `getUserMedia` needs and wry leaves off.
+//! This module is pure (no webview types) so every rule is unit tested. `shell.rs` wires it into
+//! Tauri's cross-platform `Builder::on_permission_request` (WebKitGTK's `permission-request`
+//! signal on Linux, `PermissionRequested` on WebView2, `WKUIDelegate` on macOS), so every OS gets
+//! the same rules.
 //!
-//! Status: compiled and unit tested; the real microphone check on Linux and Windows is Phase 0
+//! Status: unit tested; the real microphone check on Linux and Windows is Phase 0
 //! (`docs/roadmap.md`).
 
+use tauri::Url;
 use tauri::webview::{PermissionKind, PermissionResponse};
-use tauri::{Manager, Runtime, Url, Webview};
 
 /// Where the bundled UI is served from: `tauri://localhost` on Linux and macOS,
 /// `http://tauri.localhost` on Windows.
 const BUNDLED_ORIGINS: [&str; 2] = ["tauri://localhost", "http://tauri.localhost"];
 
-/// Registers the permission policy on the app builder.
-pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
-    builder.on_permission_request(|webview: Webview<R>, kind| {
-        let dev_url = if cfg!(debug_assertions) {
-            webview.config().build.dev_url.as_ref()
-        } else {
-            None
-        };
-        let trusted = TrustedOrigins::new(dev_url);
-        decide(kind, webview.url().ok().as_ref(), &trusted)
-    })
-}
-
-/// Per-webview settings that cannot be expressed through the builder.
+/// Answers one permission request.
 ///
-/// # Errors
-///
-/// If the platform webview cannot be reached.
-#[cfg_attr(
-    not(target_os = "linux"),
-    expect(
-        clippy::unnecessary_wraps,
-        reason = "only Linux has per-webview work to do"
-    )
-)]
-pub fn setup<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
-    #[cfg(target_os = "linux")]
-    for window in app.webview_windows().into_values() {
-        window.with_webview(|webview| {
-            use webkit2gtk::{SettingsExt, WebViewExt};
-            if let Some(settings) = WebViewExt::settings(&webview.inner()) {
-                settings.set_enable_media_stream(true);
-            }
-        })?;
-    }
-    #[cfg(not(target_os = "linux"))]
-    let _ = app;
-    Ok(())
+/// `page` is the URL loaded in the webview (if known); `dev_url` is the Vite dev server, which
+/// callers pass only in debug builds.
+pub fn respond(
+    kind: PermissionKind,
+    page: Option<&Url>,
+    dev_url: Option<&Url>,
+) -> PermissionResponse {
+    decide(kind, page, &TrustedOrigins::new(dev_url))
 }
 
 /// The decision itself, free of webview types so it can be unit tested.
@@ -151,6 +123,21 @@ mod tests {
             let response = decide(PermissionKind::Microphone, Some(&url(page)), &debug());
             assert_eq!(response, PermissionResponse::Deny, "{page}");
         }
+    }
+
+    #[test]
+    fn respond_trusts_the_dev_server_only_when_given() {
+        let page = url("http://localhost:1420/");
+        let dev = url("http://localhost:1420");
+
+        assert_eq!(
+            respond(PermissionKind::Microphone, Some(&page), Some(&dev)),
+            PermissionResponse::Allow
+        );
+        assert_eq!(
+            respond(PermissionKind::Microphone, Some(&page), None),
+            PermissionResponse::Deny
+        );
     }
 
     #[test]
