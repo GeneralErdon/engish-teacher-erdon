@@ -65,7 +65,7 @@ Run `just` to list them. The Docker profile comes from `VT_PROFILE` in `.env` (d
 | `just security` | `uv audit` + `pnpm audit` + Trivy (CI policy in `trivy.yaml`): known vulnerabilities, secrets, Dockerfiles. Needs [Trivy](https://trivy.dev) installed |
 | `just types` | Regenerate the UI's API types: the api's OpenAPI schema (`vt-api-openapi`, no server needed) → `apps/desktop/openapi.json` → `src/generated/api.d.ts` (openapi-typescript). With the api running, `pnpm --filter @voice-tutor/desktop types:live` reads `/openapi.json` from it instead |
 | `just dev` | `pron` and the profile's model services in Docker; `api` (uvicorn --reload) and the UI (Vite, http://localhost:1420) locally |
-| `just dev-api` / `just dev-ui` | One half of `just dev`. Vite forwards `/v1`, `/healthz` and `/ws` to the api (`VT_API_URL`, default `http://localhost:8080`), so in a browser the page and the api share one origin |
+| `just dev-api` / `just dev-ui` | One half of `just dev`. `just dev-api 0.0.0.0` listens on the network too, for the installed app on another device (no login: trusted networks only). Vite forwards `/v1`, `/healthz` and `/ws` to the api (`VT_API_URL`, default `http://localhost:8080`), so in a browser the page and the api share one origin |
 | `just dev-lan` | `dev-ui` for a phone on the same Wi-Fi: every interface, HTTPS with a self-signed certificate (`@vitejs/plugin-basic-ssl`), because `getUserMedia` needs a secure page. Run it with `just dev-api` |
 | `just voice` | Speaches (speech recognition + the tutor's voice) in Docker on :8000; waits until both models are downloaded (first start only) |
 | `just dev-phone` | `voice`, then `dev-api` and `dev-lan` together: the whole loop on a phone with a cloud chat model |

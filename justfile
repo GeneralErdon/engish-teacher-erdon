@@ -125,7 +125,7 @@ _serve: dev-api dev-ui
 models:
     docker compose --profile {{ PROFILE }} up -d --build --wait --scale api=0
 
-# api on :8080 with auto-reload, using the model services published on localhost
+# api on :8080 with auto-reload, using the model services published on localhost. `just dev-api 0.0.0.0` also listens on your network, for the installed app on a phone (no login: trusted networks only)
 [env("VT_DATABASE_URL", "sqlite:///data/voice-tutor.db")]
 [env("VT_LLM_BASE_URL", LLM_DEV_URL)]
 [env("VT_NOTES_DIR", "data/notes")]
@@ -134,8 +134,8 @@ models:
 [env("VT_STT_BASE_URL", "http://localhost:8000/v1")]
 [env("VT_TTS_BASE_URL", "http://localhost:8000/v1")]
 [group('dev')]
-dev-api:
-    uv run uvicorn --factory vt_api.main:create_app --reload --reload-dir services/api/src --reload-dir packages/contracts/src --port 8080
+dev-api host="127.0.0.1":
+    uv run uvicorn --factory vt_api.main:create_app --reload --reload-dir services/api/src --reload-dir packages/contracts/src --host {{ host }} --port 8080
 
 # Speech on this machine: Speaches on :8000, waits until its models are downloaded (~700 MB the first time)
 [group('dev')]

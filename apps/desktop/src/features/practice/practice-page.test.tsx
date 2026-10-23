@@ -211,6 +211,18 @@ describe('Practice', () => {
     expect(await screen.findByPlaceholderText('Connecting…')).toBeDisabled()
   })
 
+  it('in the app, says where to point it at another computer', async () => {
+    vi.stubGlobal('isTauri', true)
+    const { socket } = await openPractice()
+
+    socket.drop()
+
+    expect(screen.getByRole('link', { name: 'Settings → Backend' })).toHaveAttribute(
+      'href',
+      '/settings',
+    )
+  })
+
   it('reconnects after losing the backend', async () => {
     const { socket, user } = await openPractice()
 

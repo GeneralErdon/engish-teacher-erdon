@@ -5,13 +5,12 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { BackendStatus } from '@/features/status/backend-status'
 import { errorMessage } from '@/lib/api/errors'
-import { backendUrl } from '@/lib/platform'
 
 import { AppearanceSection } from './appearance-section'
 import { LanguageModelForm } from './language-model-form'
 import { LearningSection } from './learning-section'
+import { ServerSection } from './server-section'
 import { SpeechSection } from './speech-section'
 import { useLlmSettings, useProviders } from './use-llm'
 
@@ -58,10 +57,7 @@ export function SettingsPage() {
       </Section>
 
       <Section icon={<Server />} title="Backend" description="Where this app finds the tutor.">
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <code className="bg-muted rounded-md px-2 py-1">{backendUrl()}</code>
-          <BackendStatus />
-        </div>
+        <ServerSection />
       </Section>
     </div>
   )
