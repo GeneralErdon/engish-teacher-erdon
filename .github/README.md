@@ -6,7 +6,7 @@ Every change reaches `develop` (and later `master`) through a pull request whose
 
 | Workflow | Runs on | Job | What it enforces |
 |---|---|---|---|
-| `ci.yml` | every PR; push to `master` / `develop` | **Commit messages** | commitlint over every commit in the PR (PRs only) |
+| `ci.yml` | every PR; push to `master` / `develop` | **Commit messages** | commitlint over every commit in the PR (PRs only; not the back-merge from `master`, already released) |
 | | | **Hygiene** | the repository-wide pre-commit hooks (whitespace, YAML/TOML/JSON, large files, private keys, `uv.lock` up to date, ruff, zizmor on the workflows) |
 | | | **Python** | ruff, mypy `--strict`, import-linter contracts, pytest with **≥ 97 %** coverage |
 | | | **UI** | ESLint (type-aware), `tsc`, Prettier, Vitest with **≥ 97 %** coverage, production build; generated code up to date (`just types` and the route tree must not change) |

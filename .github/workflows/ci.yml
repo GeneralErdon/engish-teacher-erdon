@@ -18,9 +18,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Not on the pull request that merges master back into develop: its commits are released
+  # already, and the merge commit's message is written in GitHub's merge dialog, after every check.
   commits:
     name: Commit messages · commitlint
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.head_ref != 'master'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -168,7 +170,7 @@ jobs:
 
   # The one check branch protection requires. GitHub counts a skipped required check as passing,
   # so requiring each job separately is fragile; this job fails if any job above failed or was
-  # cancelled (skipped is fine: `commits` only runs on pull requests).
+  # cancelled (skipped is fine: `commits` only runs on pull requests, except back-merges).
   ci-ok:
     name: CI ok
     if: ${{ always() }}
