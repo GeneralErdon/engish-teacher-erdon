@@ -9,6 +9,8 @@ publish = false
 
 [lib]
 name = "voice_tutor_lib"
+# Android loads the app as a shared library (cdylib); desktop links it into main.rs (rlib).
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.7.3", features = [] }
