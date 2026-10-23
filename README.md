@@ -202,7 +202,9 @@ Adding dependencies, code conventions, testing strategy and typing rules: [docs/
 
 ## Desktop app and installers
 
-There are **no precompiled installers yet**: the release workflow (`.github/workflows/release.yml`) publishes them, with the Docker images, from the first tagged release in Phase 3. Until then, build them on your machine:
+**Download a build:** every merge into `develop` builds the installers on GitHub's machines ([Apps workflow](.github/workflows/apps.yml)). Open the latest **Apps** run under [Actions](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/apps.yml) and download `voice-tutor-linux` (`.deb`, `.rpm`, `.AppImage`) or `voice-tutor-windows` (`.msi`, setup `.exe`) from **Artifacts** (kept 30 days; you need to be signed in to GitHub). To build another branch: `gh workflow run apps.yml --ref <branch>` (the **Run workflow** button appears once the workflow is on `master`). Tagged releases will publish them for good, with the Docker images, from Phase 3 ([release.yml](.github/workflows/release.yml)). The installers are not code-signed yet, so Windows SmartScreen asks for confirmation.
+
+Or build them on your machine:
 
 ```bash
 just bundle

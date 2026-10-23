@@ -17,6 +17,7 @@ Every change reaches `develop` (and later `master`) through a pull request whose
 | | | **Audit** | `uv audit` (every Python package in `uv.lock`, OSV database, SARIF to the Security tab) and `pnpm audit` (high/critical). Trivy cannot parse uv's virtual-workspace lockfile nor pnpm 12's two-document lockfile, so each ecosystem uses its own auditor |
 | | | **Dependency review** | blocks PRs that add a dependency with a known HIGH vulnerability |
 | `codeql.yml` | every PR; push; weekly | **CodeQL** | `security-extended` queries for Python, TypeScript, Rust and the workflows themselves |
+| `apps.yml` | push to `develop`; by hand (`gh workflow run apps.yml --ref <branch>`) | **Desktop** (Ubuntu + Windows) | builds the installers (`.deb`, `.rpm`, `.AppImage`; `.msi`, setup `.exe`) and keeps them 30 days as the run's artifacts, to download and try between releases |
 | `release.yml` | tag `v*` | images + installers | multi-arch `api`/`pron` images to GHCR; Windows and Linux installers in a draft release (Phase 3) |
 
 Coverage reports are uploaded to [Codecov](https://about.codecov.io/) (flags `python`, `ui`, `rust`) for the PR comment and the README badge. The **97 % floor itself is enforced by the test runners**, so CI fails before a regression is even uploaded.
