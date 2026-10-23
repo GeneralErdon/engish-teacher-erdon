@@ -17,7 +17,7 @@ Versions were verified on **2026-10-20** (Phase -1). Bump them on purpose, never
 | Tasks | [**just**](https://just.systems) (`justfile`): one entry point on Linux, macOS and **Windows** (make does not run natively there) | |
 | Hooks | **pre-commit** in three stages: format/lint/secrets on commit, commitlint on the message, types/architecture/tests on push ([.github/README.md](../.github/README.md#hooks-vs-ci)) | commitlint (Conventional Commits) |
 | Coverage | pytest-cov, **≥ 97 %** | Vitest v8 and cargo-llvm-cov, **≥ 97 %** |
-| CI/CD | GitHub Actions: `ci.yml`, `security.yml` (uv audit, pnpm audit, Trivy, dependency review), `codeql.yml`, `release.yml`; Codecov | |
+| CI/CD | GitHub Actions: `ci.yml`, `security.yml` (uv audit, pnpm audit, Trivy, dependency review), `codeql.yml`, `apps.yml` (installers and APK), `release.yml` (every merge into `master`); Codecov | |
 
 Notes on choices that are not the newest thing available:
 
@@ -145,11 +145,11 @@ def phoneme_posteriors(audio: Float[Tensor, "samples"]) -> Float[Tensor, "frames
 
 | Branch | Purpose | Branches from | Merges into |
 |---|---|---|---|
-| `master` | Released code only; every merge is tagged `vX.Y.Z` | — | — |
+| `master` | Released code only; every merge is released as `vX.Y.Z` by CI ([how](../.github/README.md#releasing)) | — | — |
 | `develop` | Integration branch: the next release | `master` | — |
 | `feat/<short-name>` | One feature | `develop` | `develop` (PR) |
 | `fix/<short-name>` | One bug fix | `develop` | `develop` (PR) |
-| `release/X.Y.Z` | Freeze, version bump, changelog | `develop` | `master` + back into `develop` |
+| `release/X.Y.Z` | Freeze, version bump (`just bump X.Y.Z`) | `develop` | `master` + back into `develop` |
 | `hotfix/<short-name>` | Urgent fix on released code | `master` | `master` + `develop` |
 
 - Never commit directly to `master` or `develop`: open a PR, and merge it only with CI green.

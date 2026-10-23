@@ -202,7 +202,15 @@ Adding dependencies, code conventions, testing strategy and typing rules: [docs/
 
 ## Desktop app and installers
 
-**Download a build:** every merge into `develop` builds the apps on GitHub's machines ([Apps workflow](.github/workflows/apps.yml)). Open the latest **Apps** run under [Actions](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/apps.yml) and download `voice-tutor-linux` (`.deb`, `.rpm`, `.AppImage`), `voice-tutor-windows` (`.msi`, setup `.exe`) or `voice-tutor-android` (`.apk`, arm64) from **Artifacts** (kept 30 days; you need to be signed in to GitHub). To build another branch: `gh workflow run apps.yml --ref <branch>` (the **Run workflow** button appears once the workflow is on `master`). Tagged releases will publish them for good, with the Docker images, from Phase 3 ([release.yml](.github/workflows/release.yml)). The installers are not code-signed yet, so Windows SmartScreen asks for confirmation.
+**Download:** every release puts the apps on the [**Releases**](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest) page, no sign-in needed. These links always get the newest one:
+
+| Platform | Files |
+|---|---|
+| Windows | [Installer (.exe)](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-windows-x64-setup.exe) · [.msi](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-windows-x64.msi) |
+| Linux | [.AppImage](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-linux-x86_64.AppImage) · [.deb](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-linux-amd64.deb) · [.rpm](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-linux-x86_64.rpm) |
+| Android (arm64) | [.apk](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-android-arm64.apk) |
+
+The installers are not code-signed yet, so Windows SmartScreen asks for confirmation. To try a branch between releases, build it on GitHub's machines: `gh workflow run apps.yml --ref <branch>` (or **Run workflow** on the [Apps workflow](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/apps.yml)), then download the apps from the run's **Artifacts** (signed in to GitHub, kept 30 days).
 
 Or build them on your machine:
 
@@ -215,10 +223,10 @@ Output goes to `apps/desktop/src-tauri/target/release/bundle/`: `.deb`, `.rpm` a
 **On an Android phone:**
 
 1. On the computer: `just voice` once, then `just dev-api 0.0.0.0`, so the api listens on your network (no login: trusted networks only).
-2. On the phone: download `voice-tutor-android` from the Apps run (signed in to GitHub), unzip it and open the `.apk`. Android asks to allow installing apps from that source, the first time.
+2. On the phone: download the [`.apk`](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-android-arm64.apk) and open it. Android asks to allow installing apps from that source, the first time.
 3. In the app: **Settings → Backend**, enter the computer's address (`192.168.x.x:8080`) and **Check and use**. The first call asks for the microphone.
 
-Every APK is signed with the same key, so a new build installs over the previous one and keeps your settings.
+Every APK is signed with the same key, so a new release installs over the previous one and keeps your settings.
 
 Today the apps are **clients**: the installer contains the window and the UI, not the models. An all-in-one installer is planned for Phase 4: it starts the backend by itself and downloads the models on first run, with no Docker ([why and how](docs/architecture.md#distribution)).
 

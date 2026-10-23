@@ -1,5 +1,10 @@
 name: Set up Node
 description: pnpm (version from package.json#packageManager), Node (from .nvmrc) with the store cached, the locked workspace and just.
+inputs:
+  cache:
+    description: Restore and save the pnpm store. Releases build from scratch ("false").
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
@@ -7,7 +12,8 @@ runs:
     - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: .nvmrc
-        cache: pnpm
+        cache: ${{ inputs.cache == 'true' && 'pnpm' || '' }}
+        package-manager-cache: ${{ inputs.cache == 'true' }}
     - uses: $/.github/actions/setup-just
     - name: Install the workspace (locked)
       shell: bash

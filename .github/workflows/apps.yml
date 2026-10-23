@@ -1,23 +1,28 @@
-# Installable apps, built on GitHub's machines, to download from the run's "Artifacts" section:
-# Linux (.deb, .rpm, .AppImage), Windows (.msi, setup .exe) and Android (.apk, arm64).
-#   - after every merge into develop
-#   - by hand, any branch: gh workflow run apps.yml --ref <branch> (or the Run workflow button,
-#     once this file is on the default branch)
-# Releases (`v*` tags, attached to a GitHub release) are built by release.yml.
+# Installable apps, built on GitHub's machines: Linux (.deb, .rpm, .AppImage), Windows (.msi,
+# setup .exe) and Android (.apk, arm64). A full build takes about 25 minutes, so not on every push:
+#   - every release: release.yml calls this workflow and attaches the apps to the GitHub release
+#   - by hand, to try a branch between releases: gh workflow run apps.yml --ref <branch> (or the
+#     Run workflow button); the apps are then the run's artifacts, kept 30 days
 name: Apps
 
 on:
-  push:
-    branches: [develop]
+  workflow_call:
+    inputs:
+      release:
+        description: Called by release.yml. Builds from scratch (no caches) and keeps the artifacts one day, until the release holds them.
+        type: boolean
+        default: false
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: true
+      ANDROID_KEY_ALIAS:
+        required: true
+      ANDROID_KEY_PASSWORD:
+        required: true
   workflow_dispatch:
 
 permissions:
   contents: read
-
-# A newer push supersedes the build in progress.
-concurrency:
-  group: apps-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   desktop:
@@ -43,9 +48,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: $/.github/actions/setup-node
+        with:
+          cache: ${{ !inputs.release }}
       - uses: $/.github/actions/setup-rust
         with:
           cache-key: apps
+          cache: ${{ !inputs.release }}
       - name: Build the installers
         run: pnpm --filter @voice-tutor/desktop tauri build
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -53,7 +61,7 @@ jobs:
           name: voice-tutor-${{ matrix.platform }}
           path: ${{ matrix.installers }}
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ inputs.release && 1 || 30 }}
 
   android:
     name: Android
@@ -63,9 +71,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: $/.github/actions/setup-node
+        with:
+          cache: ${{ !inputs.release }}
       - uses: $/.github/actions/setup-rust
         with:
           cache-key: android
+          cache: ${{ !inputs.release }}
       # arm64: nearly every phone sold in the last years. The runner brings the Android SDK, the
       # NDK and Java 17.
       - name: Rust target for Android phones
@@ -114,4 +125,4 @@ jobs:
           name: voice-tutor-android
           path: apps/desktop/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ inputs.release && 1 || 30 }}
