@@ -18,6 +18,7 @@ Every change reaches `develop` (and later `master`) through a pull request whose
 | | | **Dependency review** | blocks PRs that add a dependency with a known HIGH vulnerability |
 | `codeql.yml` | every PR; push; weekly | **CodeQL** | `security-extended` queries for Python, TypeScript, Rust and the workflows themselves |
 | `apps.yml` | push to `develop`; by hand (`gh workflow run apps.yml --ref <branch>`) | **Desktop** (Ubuntu + Windows) | builds the installers (`.deb`, `.rpm`, `.AppImage`; `.msi`, setup `.exe`) and keeps them 30 days as the run's artifacts, to download and try between releases |
+| | | **Android** | a signed arm64 `.apk` from `apps/desktop/src-tauri/gen/android` (the runner brings the Android SDK, NDK and Java 17), kept 30 days. If the Android project is missing, generates it instead and uploads it as `android-project`, to commit |
 | `release.yml` | tag `v*` | images + installers | multi-arch `api`/`pron` images to GHCR; Windows and Linux installers in a draft release (Phase 3) |
 
 Coverage reports are uploaded to [Codecov](https://about.codecov.io/) (flags `python`, `ui`, `rust`) for the PR comment and the README badge. The **97 % floor itself is enforced by the test runners**, so CI fails before a regression is even uploaded.
@@ -66,3 +67,4 @@ Pre-push hooks only run for the languages you touched. `just check` + `just test
 
 1. **Codecov:** sign in at codecov.io with GitHub and enable `engish-teacher-erdon` (installs the Codecov app). Uploads use OIDC, so no token is needed. Until then the upload step only warns.
 2. **Private vulnerability reporting:** Settings → Code security → enable it (SECURITY.md links to it).
+3. **Android signing key** (done 2026-10-23): a PKCS12 key made with `keytool` (alias `voice-tutor`), kept outside the repository by the maintainer, and stored as the secrets `ANDROID_KEYSTORE_BASE64` (`base64 -w0 release.p12`), `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. The Apps workflow writes `gen/android/keystore.properties` from them (git-ignored). Same key for every build, so APKs update in place; losing it means uninstalling before installing a build signed with a new one.

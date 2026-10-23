@@ -1,5 +1,5 @@
 # Installable apps, built on GitHub's machines, to download from the run's "Artifacts" section:
-# Linux (.deb, .rpm, .AppImage) and Windows (.msi, setup .exe).
+# Linux (.deb, .rpm, .AppImage), Windows (.msi, setup .exe) and Android (.apk, arm64).
 #   - after every merge into develop
 #   - by hand, any branch: gh workflow run apps.yml --ref <branch> (or the Run workflow button,
 #     once this file is on the default branch)
@@ -52,5 +52,66 @@ jobs:
         with:
           name: voice-tutor-${{ matrix.platform }}
           path: ${{ matrix.installers }}
+          if-no-files-found: error
+          retention-days: 30
+
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: $/.github/actions/setup-node
+      - uses: $/.github/actions/setup-rust
+        with:
+          cache-key: android
+      # arm64: nearly every phone sold in the last years. The runner brings the Android SDK, the
+      # NDK and Java 17.
+      - name: Rust target for Android phones
+        run: rustup target add aarch64-linux-android
+      # The Android project lives in src-tauri/gen/android and is committed with our changes
+      # (microphone permission, plain HTTP to a server on the LAN, release signing). If it is
+      # missing, this generates it and uploads it as `android-project`, to commit, instead of
+      # building.
+      - id: project
+        name: Android project
+        run: |
+          if [[ -f apps/desktop/src-tauri/gen/android/build.gradle.kts ]]; then
+            echo "generated=false" >> "$GITHUB_OUTPUT"
+          else
+            NDK_HOME="$ANDROID_NDK_LATEST_HOME" pnpm --filter @voice-tutor/desktop tauri android init --ci
+            pnpm --filter @voice-tutor/desktop tauri icon app-icon.svg
+            echo "generated=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.project.outputs.generated == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-project
+          path: apps/desktop/src-tauri/gen/android
+          include-hidden-files: true
+          retention-days: 7
+      # The same key signs every build, so a new APK installs over the previous one.
+      - name: Signing key
+        if: steps.project.outputs.generated == 'false'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          base64 --decode <<< "$KEYSTORE_BASE64" > "$RUNNER_TEMP/release.jks"
+          {
+            echo "keyAlias=$KEY_ALIAS"
+            echo "password=$KEY_PASSWORD"
+            echo "storeFile=$RUNNER_TEMP/release.jks"
+          } > apps/desktop/src-tauri/gen/android/keystore.properties
+      - name: Build the APK
+        if: steps.project.outputs.generated == 'false'
+        run: NDK_HOME="$ANDROID_NDK_LATEST_HOME" pnpm --filter @voice-tutor/desktop tauri android build --apk --target aarch64
+      - if: steps.project.outputs.generated == 'false'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: voice-tutor-android
+          path: apps/desktop/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 30

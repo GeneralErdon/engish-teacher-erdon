@@ -10,11 +10,13 @@ use tauri::{Manager, Runtime, Webview};
 
 use crate::permissions;
 
-/// Builds and runs the desktop app (called from `main.rs`).
+/// Builds and runs the app: called from `main.rs` on desktop, and by Android through the
+/// generated entry point.
 ///
 /// # Panics
 ///
 /// If the Tauri runtime cannot start, e.g. the system webview is missing.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .on_permission_request(|webview, kind| on_permission_request(&webview, kind))

@@ -202,7 +202,7 @@ Adding dependencies, code conventions, testing strategy and typing rules: [docs/
 
 ## Desktop app and installers
 
-**Download a build:** every merge into `develop` builds the installers on GitHub's machines ([Apps workflow](.github/workflows/apps.yml)). Open the latest **Apps** run under [Actions](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/apps.yml) and download `voice-tutor-linux` (`.deb`, `.rpm`, `.AppImage`) or `voice-tutor-windows` (`.msi`, setup `.exe`) from **Artifacts** (kept 30 days; you need to be signed in to GitHub). To build another branch: `gh workflow run apps.yml --ref <branch>` (the **Run workflow** button appears once the workflow is on `master`). Tagged releases will publish them for good, with the Docker images, from Phase 3 ([release.yml](.github/workflows/release.yml)). The installers are not code-signed yet, so Windows SmartScreen asks for confirmation.
+**Download a build:** every merge into `develop` builds the apps on GitHub's machines ([Apps workflow](.github/workflows/apps.yml)). Open the latest **Apps** run under [Actions](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/apps.yml) and download `voice-tutor-linux` (`.deb`, `.rpm`, `.AppImage`), `voice-tutor-windows` (`.msi`, setup `.exe`) or `voice-tutor-android` (`.apk`, arm64) from **Artifacts** (kept 30 days; you need to be signed in to GitHub). To build another branch: `gh workflow run apps.yml --ref <branch>` (the **Run workflow** button appears once the workflow is on `master`). Tagged releases will publish them for good, with the Docker images, from Phase 3 ([release.yml](.github/workflows/release.yml)). The installers are not code-signed yet, so Windows SmartScreen asks for confirmation.
 
 Or build them on your machine:
 
@@ -212,7 +212,15 @@ just bundle
 
 Output goes to `apps/desktop/src-tauri/target/release/bundle/`: `.deb`, `.rpm` and `.AppImage` on Linux; `.msi` and `.exe` (NSIS) on Windows. The app talks to the backend at `http://localhost:8080` by default, so start it with Docker or `just dev-api` first. To use a backend on another computer of your network, set its address in **Settings → Backend** (the app checks it before switching) and run the api there with `just dev-api 0.0.0.0`: it then listens on the network, which has no login, so only do it on networks you trust.
 
-Today the desktop app is a **client**: the installer contains the window and the UI, not the models. An all-in-one installer is planned for Phase 4: it starts the backend by itself and downloads the models on first run, with no Docker ([why and how](docs/architecture.md#distribution)).
+**On an Android phone:**
+
+1. On the computer: `just voice` once, then `just dev-api 0.0.0.0`, so the api listens on your network (no login: trusted networks only).
+2. On the phone: download `voice-tutor-android` from the Apps run (signed in to GitHub), unzip it and open the `.apk`. Android asks to allow installing apps from that source, the first time.
+3. In the app: **Settings → Backend**, enter the computer's address (`192.168.x.x:8080`) and **Check and use**. The first call asks for the microphone.
+
+Every APK is signed with the same key, so a new build installs over the previous one and keeps your settings.
+
+Today the apps are **clients**: the installer contains the window and the UI, not the models. An all-in-one installer is planned for Phase 4: it starts the backend by itself and downloads the models on first run, with no Docker ([why and how](docs/architecture.md#distribution)).
 
 ## Configuration
 
