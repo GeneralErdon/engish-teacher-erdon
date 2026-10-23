@@ -210,7 +210,7 @@ Or build them on your machine:
 just bundle
 ```
 
-Output goes to `apps/desktop/src-tauri/target/release/bundle/`: `.deb`, `.rpm` and `.AppImage` on Linux; `.msi` and `.exe` (NSIS) on Windows. The app talks to the backend at `http://localhost:8080`, so start it with Docker or `just dev-api` first.
+Output goes to `apps/desktop/src-tauri/target/release/bundle/`: `.deb`, `.rpm` and `.AppImage` on Linux; `.msi` and `.exe` (NSIS) on Windows. The app talks to the backend at `http://localhost:8080` by default, so start it with Docker or `just dev-api` first. To use a backend on another computer of your network, set its address in **Settings → Backend** (the app checks it before switching) and run the api there with `just dev-api 0.0.0.0`: it then listens on the network, which has no login, so only do it on networks you trust.
 
 Today the desktop app is a **client**: the installer contains the window and the UI, not the models. An all-in-one installer is planned for Phase 4: it starts the backend by itself and downloads the models on first run, with no Docker ([why and how](docs/architecture.md#distribution)).
 

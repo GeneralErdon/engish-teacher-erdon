@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useSpeechStatus } from '@/features/settings/use-speech'
+import { inApp } from '@/lib/platform'
 
 import { CallView } from './call-view'
 import { Composer } from './composer'
@@ -117,7 +118,19 @@ export function PracticePage() {
           <WifiOff />
           <AlertTitle>Disconnected from the tutor</AlertTitle>
           <AlertDescription className="flex flex-col items-start gap-3">
-            Is the backend running? Start it with <code>just dev-api</code>.
+            <span>
+              Is the backend running? Start it with <code>just dev-api</code>.
+              {inApp() && (
+                <>
+                  {' '}
+                  On another computer? Set its address in{' '}
+                  <Link to="/settings" className="underline underline-offset-4">
+                    Settings → Backend
+                  </Link>
+                  .
+                </>
+              )}
+            </span>
             <Button size="sm" variant="outline" onClick={conversation.reconnect}>
               <RotateCw /> Reconnect
             </Button>
