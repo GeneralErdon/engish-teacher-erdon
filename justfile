@@ -167,10 +167,17 @@ dev-lan:
 desktop:
     pnpm --filter {{ desktop }} tauri dev
 
-# Installers for the current OS (CI builds Windows and Linux)
+# Installers for the current OS (CI builds Windows, Linux and Android)
 [group('release')]
 bundle:
     pnpm --filter {{ desktop }} tauri build
+
+# Set the release version in every package and lockfile: `just bump 0.2.0`, in the release PR
+[group('release')]
+bump version:
+    uv run --no-project scripts/version.py bump {{ version }}
+    uv lock
+    cargo update --workspace --offline --manifest-path {{ tauri_manifest }}
 
 # Full stack in Docker: `just up` or `just up amd`
 [group('docker')]

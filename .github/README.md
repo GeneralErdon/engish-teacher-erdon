@@ -17,9 +17,12 @@ Every change reaches `develop` (and later `master`) through a pull request whose
 | | | **Audit** | `uv audit` (every Python package in `uv.lock`, OSV database, SARIF to the Security tab) and `pnpm audit` (high/critical). Trivy cannot parse uv's virtual-workspace lockfile nor pnpm 12's two-document lockfile, so each ecosystem uses its own auditor |
 | | | **Dependency review** | blocks PRs that add a dependency with a known HIGH vulnerability |
 | `codeql.yml` | every PR; push; weekly | **CodeQL** | `security-extended` queries for Python, TypeScript, Rust and the workflows themselves |
-| `apps.yml` | push to `develop`; by hand (`gh workflow run apps.yml --ref <branch>`) | **Desktop** (Ubuntu + Windows) | builds the installers (`.deb`, `.rpm`, `.AppImage`; `.msi`, setup `.exe`) and keeps them 30 days as the run's artifacts, to download and try between releases |
-| | | **Android** | a signed arm64 `.apk` from `apps/desktop/src-tauri/gen/android` (the runner brings the Android SDK, NDK and Java 17), kept 30 days. If the Android project is missing, generates it instead and uploads it as `android-project`, to commit |
-| `release.yml` | tag `v*` | images + installers | multi-arch `api`/`pron` images to GHCR; Windows and Linux installers in a draft release (Phase 3) |
+| `apps.yml` | called by `release.yml`; by hand (`gh workflow run apps.yml --ref <branch>`) | **Desktop** (Ubuntu + Windows) | builds the installers (`.deb`, `.rpm`, `.AppImage`; `.msi`, setup `.exe`). Not on every push: a full build takes about 25 minutes. By hand, they stay 30 days as the run's artifacts, to try a branch between releases |
+| | | **Android** | a signed arm64 `.apk` from `apps/desktop/src-tauri/gen/android` (the runner brings the Android SDK, NDK and Java 17). If the Android project is missing, generates it instead and uploads it as `android-project`, to commit |
+| `release.yml` | PR into `master`; push to `master` | **Version** | the version (`just bump X.Y.Z`) is the same in every package and not released yet. On a PR, that is all it runs |
+| | push to `master` | **Apps** | `apps.yml`, from scratch (no caches) |
+| | | **Image** · api, pron | multi-arch (`amd64`, `arm64`) images to GHCR: `X.Y.Z`, `X.Y` and `latest` |
+| | | **GitHub release** | tags `vX.Y.Z` and publishes the release: download links first, then the merged PRs. The apps get fixed names (`voice-tutor-windows-x64-setup.exe`…), so `releases/latest/download/<name>` always serves the newest |
 
 Coverage reports are uploaded to [Codecov](https://about.codecov.io/) (flags `python`, `ui`, `rust`) for the PR comment and the README badge. The **97 % floor itself is enforced by the test runners**, so CI fails before a regression is even uploaded.
 
@@ -62,6 +65,13 @@ Pre-push hooks only run for the languages you touched. `just check` + `just test
 - Local composite actions (`.github/actions/setup-*`) use GitHub's self-repository syntax (`$/…`), so they are resolved from the same commit as the workflow.
 - Release builds use no caches that pull request runs could have written.
 - Jobs get the minimum `permissions:`; checkouts do not persist credentials; Codecov uploads use OIDC (no stored token).
+
+## Releasing
+
+1. From `develop`: `git switch -c release/X.Y.Z`, then `just bump X.Y.Z` (sets the version in `package.json`, `Cargo.toml`, the `pyproject.toml` files and both lockfiles) and commit it as `chore(release): X.Y.Z`.
+2. Open the PR into `master`. The **Version** check fails if the version is already released or differs between packages.
+3. Merge it: `release.yml` builds everything and publishes the release (about 30 minutes).
+4. Merge `master` back into `develop` (a PR from `master`), so the version bump is there too.
 
 ## Maintainer setup (one time)
 

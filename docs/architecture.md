@@ -57,7 +57,8 @@ voice-tutor/
 │   ├── dependabot.yml           # weekly grouped updates per ecosystem
 │   └── workflows/
 │       ├── ci.yml               # lint, typecheck, tests (Rust on Linux + Windows), image builds
-│       └── release.yml          # multi-arch images to GHCR + desktop installers on tag
+│       ├── apps.yml             # installers + APK: by hand, or called by release.yml
+│       └── release.yml          # every merge into master: GitHub release + images to GHCR
 ├── docker/
 │   ├── caddy/Caddyfile          # optional HTTPS for LAN access
 │   └── whisper-vulkan/Dockerfile# whisper.cpp built with Vulkan (AMD/Intel)
