@@ -10,9 +10,11 @@ from typing import Literal
 from pydantic import DirectoryPath, Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from vt_contracts.learner import CefrLevel, ExplanationLanguage
+from vt_contracts.llm import ProviderKind
+
 type Profile = Literal["cpu", "nvidia", "amd", "external"]
 type SttBackend = Literal["openai", "whispercpp"]
-type CefrLevel = Literal["A1", "A2", "B1", "B2", "C1", "C2"]
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 DEFAULT_CORS_ORIGINS = (
@@ -42,7 +44,8 @@ class Settings(BaseSettings):
     ui_dir: DirectoryPath | None = None
     log_level: LogLevel = "INFO"
 
-    # Chat model (any OpenAI-compatible endpoint)
+    # Chat model. These apply until a provider is saved from the UI (in the database).
+    llm_provider: ProviderKind = "openai_compatible"
     llm_base_url: HttpUrl = HttpUrl("http://llm:8080/v1")
     llm_model: str = "gemma-3-4b-it-q4"
     llm_api_key: SecretStr = SecretStr("")
@@ -51,25 +54,36 @@ class Settings(BaseSettings):
     # Speech-to-text
     stt_backend: SttBackend = "openai"
     stt_base_url: HttpUrl = HttpUrl("http://stt:8000/v1")
-    stt_model: str = "large-v3-turbo"
+    # Speaches model id. CPU: distil small.en (fast). GPU: Systran/faster-whisper-large-v3-turbo.
+    stt_model: str = "Systran/faster-distil-whisper-small.en"
 
-    # Text-to-speech
-    tts_base_url: HttpUrl = HttpUrl("http://tts:8880/v1")
+    # Text-to-speech: Kokoro, served by the same Speaches as speech-to-text.
+    tts_base_url: HttpUrl = HttpUrl("http://tts:8000/v1")
+    tts_model: str = "speaches-ai/Kokoro-82M-v1.0-ONNX"
     tts_voice: str = "af_heart"
-    tts_speed: float = Field(default=0.95, gt=0.0, le=4.0)
+    # Kokoro's range. Slightly slower than normal helps learners.
+    tts_speed: float = Field(default=0.95, ge=0.5, le=2.0)
 
     # Pronunciation scoring
     pron_base_url: HttpUrl = HttpUrl("http://pron:8001")
 
-    # Voice activity detection
-    vad_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    vad_min_silence_ms: int = Field(default=600, gt=0)
-
     # Learner
     learner_l1: str = Field(default="es", pattern=r"^[a-z]{2,3}$")
     learner_level: CefrLevel = "B1"
+    # Language of correction explanations: English or the native language above.
+    learner_explanations: ExplanationLanguage = "native"
 
     # Storage and privacy
     notes_dir: Path = Path("/data/notes")
-    db_path: Path = Path("/data/progress.db")
+    # Settings saved from the UI, API keys included: SQLite encrypted with SQLCipher (file mode
+    # 0600). Only SQLite for now. Three slashes and a relative path, or four and an absolute one.
+    database_url: str = Field(
+        default="sqlite:////data/voice-tutor.db", pattern=r"^sqlite:///[^?]+$"
+    )
+    # Master key of the database (base64, 32 bytes). Unset: the key file below if it exists,
+    # else the OS keyring (desktop), else a new key file. See docs/configuration.md#encryption.
+    secret_key: SecretStr | None = None
+    secret_key_file: Path = Path("/data/secret.key")
+    # Keep the key in the OS keyring when there is one. Off: always the key file.
+    keyring: bool = True
     keep_audio: bool = False

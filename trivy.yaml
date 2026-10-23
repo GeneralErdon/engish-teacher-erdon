@@ -1,0 +1,36 @@
+# Trivy policy, shared by CI (.github/workflows/security.yml) and local runs (`just security`).
+# Covers Cargo.lock, secrets and Dockerfiles. uv.lock and pnpm-lock.yaml are audited by
+# `uv audit` and `pnpm audit` instead: Trivy cannot parse a uv virtual-workspace root or
+# pnpm 12's two-document lockfile.
+# CLI flags win over this file. Docs: https://trivy.dev/latest/docs/references/configuration/config-file/
+
+# Only break the build for what matters.
+severity:
+  - HIGH
+  - CRITICAL
+
+# 1 = findings present. Makes the CI job fail.
+exit-code: 1
+
+timeout: 10m
+
+scan:
+  scanners:
+    - vuln
+    - secret
+    - misconfig
+  skip-dirs:
+    - .git
+    - .venv
+    - node_modules
+    - apps/desktop/node_modules
+    - apps/desktop/dist
+    - apps/desktop/coverage
+    - apps/desktop/src-tauri/target
+    - data
+
+vulnerability:
+  # With no patched version there is nothing to do in a pull request; review those separately.
+  ignore-unfixed: true
+
+ignorefile: .trivyignore

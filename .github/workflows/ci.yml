@@ -1,3 +1,6 @@
+# Quality gates for every pull request and every push to master/develop.
+# What each job enforces, and how it maps to the git hooks: .github/README.md.
+# Actions are pinned to commit SHAs (the comment shows the release); Dependabot bumps them.
 name: CI
 
 on:
@@ -10,93 +13,176 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Cancel superseded pull request runs; never a trunk push (it is the record of that commit).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  python:
-    name: Python · ruff, mypy, import-linter, pytest
+  commits:
+    name: Commit messages · commitlint
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      # uv version: `required-version` in pyproject.toml. Python: .python-version.
-      - uses: astral-sh/setup-uv@v10
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          enable-cache: true
-      - uses: extractions/setup-just@v4
-      - run: uv sync --all-packages --locked
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: $/.github/actions/setup-node
+      - name: Every commit in the pull request follows Conventional Commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm exec commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+
+  hygiene:
+    name: Hygiene · pre-commit hooks, zizmor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: $/.github/actions/setup-python
+      - name: Repository-wide hooks
+        env:
+          # eslint / prettier / cargo-fmt run in their language jobs; gitleaks only scans staged
+          # changes (Trivy covers secrets in CI); no-commit-to-branch is a local-only guard.
+          SKIP: eslint,prettier,cargo-fmt,gitleaks,no-commit-to-branch
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+  python:
+    name: Python · ruff, mypy, import-linter, pytest ≥97%
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Codecov upload over OIDC (no token stored)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: $/.github/actions/setup-python
       - run: just check-py
-      - run: just test-py
-      # TODO(Phase 1): fail if `just types` would change apps/desktop/src/generated.
-      # TODO(Phase 2): fail if the README results block is out of date with eval/results/latest.json.
+      - if: ${{ !cancelled() }}
+        run: just test-py
+      - name: Upload coverage
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          use_oidc: true
+          files: coverage.xml
+          flags: python
+          fail_ci_if_error: false
 
   ui:
-    name: UI · eslint, tsc, prettier, vitest, build
+    name: UI · eslint, tsc, prettier, vitest ≥97%, build, generated code
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Codecov upload over OIDC (no token stored)
     steps:
-      - uses: actions/checkout@v7
-      # pnpm version: package.json#packageManager. Node: .nvmrc.
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - uses: extractions/setup-just@v4
-      - run: pnpm install --frozen-lockfile
+          persist-credentials: false
+      - uses: $/.github/actions/setup-node
+      - uses: $/.github/actions/setup-python
       - run: just check-ui
-      - run: just test-ui
-      - run: pnpm --filter @voice-tutor/desktop build
+      - if: ${{ !cancelled() }}
+        run: just test-ui
+      - if: ${{ !cancelled() }}
+        run: pnpm --filter @voice-tutor/desktop build
+      # The UI's API types come from the api's OpenAPI schema, and the route tree from
+      # src/routes. Both are committed; regenerate them and fail if they changed.
+      - name: Generated code is up to date (`just types`, route tree)
+        if: ${{ !cancelled() }}
+        run: |
+          just types
+          git diff --exit-code -- apps/desktop/openapi.json apps/desktop/src/generated
+      - name: Upload coverage
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          use_oidc: true
+          files: apps/desktop/coverage/lcov.info
+          flags: ui
+          fail_ci_if_error: false
 
   desktop:
-    name: Desktop · ${{ matrix.os }} · fmt, clippy, cargo test
+    name: Desktop · ${{ matrix.os }} · fmt, clippy, cargo test ≥97%
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write # Codecov upload over OIDC (no token stored)
     steps:
-      - uses: actions/checkout@v7
-      - name: Tauri system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
-            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-      # Installs the toolchain pinned in rust-toolchain.toml (with rustfmt and clippy).
-      - run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          workspaces: apps/desktop/src-tauri
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+          persist-credentials: false
+      - uses: $/.github/actions/setup-node
+      - uses: $/.github/actions/setup-rust
         with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - uses: extractions/setup-just@v4
-      - run: pnpm install --frozen-lockfile
+          cache-key: ci
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-llvm-cov@0.9.1
       # tauri::generate_context!() embeds the built UI.
       - run: pnpm --filter @voice-tutor/desktop build
       - run: just check-rust
-      - run: just test-rust
+      - if: ${{ !cancelled() }}
+        run: just test-rust
+      - name: Upload coverage
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          use_oidc: true
+          files: apps/desktop/src-tauri/target/lcov.info
+          flags: rust
+          fail_ci_if_error: false
 
   docker:
     name: Docker · compose config, build api and pron
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - run: docker compose --profile "*" config --quiet
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/build-push-action@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: compose.yaml is valid for every profile
+        run: docker compose --profile "*" config --quiet
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: services/api/Dockerfile
           push: false
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
-      - uses: docker/build-push-action@v7
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: services/pron/Dockerfile
           push: false
           cache-from: type=gha,scope=pron
           cache-to: type=gha,mode=max,scope=pron
+      # TODO(Phase 2): fail if the README results block is out of date with eval/results/latest.json.
+
+  # The one check branch protection requires. GitHub counts a skipped required check as passing,
+  # so requiring each job separately is fragile; this job fails if any job above failed or was
+  # cancelled (skipped is fine: `commits` only runs on pull requests).
+  ci-ok:
+    name: CI ok
+    if: ${{ always() }}
+    needs: [commits, hygiene, python, ui, desktop, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success | skipped) ;;
+              *) echo "::error::a required job ended as '$result'"; exit 1 ;;
+            esac
+          done

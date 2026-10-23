@@ -1,18 +1,66 @@
-# Skeleton (Phase 3): runs once the repository has a GitHub remote and a `v*` tag is pushed.
-#   - api and pron images, multi-arch, to GHCR
-#   - desktop installers (Windows .msi/.exe, Linux .AppImage/.deb/.rpm) in a draft release
+# Releases. Every merge into master (a release or hotfix pull request) publishes vX.Y.Z, the version
+# set with `just bump X.Y.Z` (scripts/version.py):
+#   - a GitHub release with the apps built by apps.yml (Linux, Windows, Android), under names that
+#     never change, so .../releases/latest/download/<name> always gets the newest one
+#   - the api and pron images, multi-arch, on GHCR
+# On a pull request into master it only checks the version: new, and the same in every package.
+# Release builds start from scratch: no caches that other runs could have written.
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [master]
+  pull_request:
+    branches: [master]
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A release runs to the end; a newer push to the pull request supersedes its check.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: version
+        name: New, and the same in every package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 scripts/version.py check)
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$version" --silent 2> /dev/null; then
+            echo "::error::v$version is already released. Bump the version in this pull request: just bump X.Y.Z"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  apps:
+    name: Apps
+    needs: version
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+    uses: $/.github/workflows/apps.yml
+    with:
+      release: true
+    secrets:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
   images:
     name: Image · ${{ matrix.service }}
+    needs: version
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,22 +69,25 @@ jobs:
       matrix:
         service: [api, pron]
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/voice-tutor-${{ matrix.service }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-      - uses: docker/build-push-action@v7
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.version.outputs.version }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: services/${{ matrix.service }}/Dockerfile
@@ -44,43 +95,57 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
-  desktop:
-    name: Installers · ${{ matrix.os }}
+  publish:
+    name: GitHub release
+    needs: [version, apps, images]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - name: Tauri system dependencies
-        if: runner.os == 'Linux'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: voice-tutor-*
+          path: artifacts
+      # Tauri puts the version in the file names; the release uses fixed ones, for stable links.
+      - name: Installers under fixed names, with checksums
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
-            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-      - run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop/src-tauri
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      # TODO(Phase 3): code signing (Windows) and the updater key, as repository secrets.
-      - uses: tauri-apps/tauri-action@v1
+          mkdir release
+          pick() {
+            mapfile -t found < <(find artifacts -type f -name "$1")
+            if (( ${#found[@]} != 1 )); then
+              echo "::error::expected one $1 among the apps, found ${#found[@]}"
+              exit 1
+            fi
+            mv "${found[0]}" "release/$2"
+          }
+          pick '*.AppImage' voice-tutor-linux-x86_64.AppImage
+          pick '*.deb' voice-tutor-linux-amd64.deb
+          pick '*.rpm' voice-tutor-linux-x86_64.rpm
+          pick '*-setup.exe' voice-tutor-windows-x64-setup.exe
+          pick '*.msi' voice-tutor-windows-x64.msi
+          pick '*.apk' voice-tutor-android-arm64.apk
+          (cd release && sha256sum -- * > SHA256SUMS)
+      # The notes start with the download links; GitHub appends the merged pull requests.
+      - name: Release v${{ needs.version.outputs.version }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: voice-tutor ${{ github.ref_name }}
-          releaseDraft: true
-          prerelease: false
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION"
+          images="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/voice-tutor"
+          cat > notes.md << EOF
+          ## Download
+
+          | Platform | Files |
+          |---|---|
+          | **Windows** | [Installer (.exe)]($base/voice-tutor-windows-x64-setup.exe) · [.msi]($base/voice-tutor-windows-x64.msi) |
+          | **Linux** | [.AppImage]($base/voice-tutor-linux-x86_64.AppImage) · [.deb]($base/voice-tutor-linux-amd64.deb) · [.rpm]($base/voice-tutor-linux-x86_64.rpm) |
+          | **Android** (arm64) | [.apk]($base/voice-tutor-android-arm64.apk) |
+          | **Server** (Docker) | \`$images-api:$VERSION\` · \`$images-pron:$VERSION\` |
+
+          The apps talk to the voice-tutor server, so start it first ([Run it with Docker](https://github.com/$GITHUB_REPOSITORY#run-it-with-docker)). They are not code-signed yet: Windows SmartScreen asks for confirmation, and Android asks to allow installing from this source. Checksums: [SHA256SUMS]($base/SHA256SUMS).
+          EOF
+          gh release create "v$VERSION" release/* --target "$GITHUB_SHA" --title "voice-tutor v$VERSION" \
+            --notes-file notes.md --generate-notes --latest

@@ -12,8 +12,17 @@ PROFILE := env("VT_PROFILE", "cpu")
 # Where `just dev` finds the chat model from the host. `external` reuses your own server URL.
 LLM_DEV_URL := if PROFILE == "external" { replace(env("VT_LLM_BASE_URL", "http://localhost:11434/v1"), "host.docker.internal", "localhost") } else { "http://localhost:8081/v1" }
 
+# Speaches service for the profile: speech recognition and the tutor's voice.
+SPEECH := if PROFILE == "nvidia" { "stt-nvidia" } else { "stt-cpu" }
+
 desktop := "@voice-tutor/desktop"
 tauri_manifest := "apps/desktop/src-tauri/Cargo.toml"
+
+# Coverage floor for every language. Never lower it to make a build pass (docs/development.md#testing).
+COVERAGE_MIN := "97"
+
+# Rust files that need a real window/webview: excluded from coverage (see src-tauri/src/shell.rs).
+rust_cov_ignore := "(main|shell)\\.rs$"
 
 [private]
 default:
@@ -24,6 +33,7 @@ default:
 setup:
     uv sync --all-packages
     pnpm install
+    cargo install --locked cargo-llvm-cov
     uv run pre-commit install
 
 # Format Python, TypeScript and Rust
@@ -61,29 +71,46 @@ check-rust:
     cargo fmt --manifest-path {{ tauri_manifest }} --check
     cargo clippy --manifest-path {{ tauri_manifest }} --all-targets --locked -- -D warnings
 
-# Run every test suite
+# Run every test suite, each with its 97% coverage floor (what CI runs)
 [group('quality')]
 test: test-py test-ui test-rust
 
-# pytest (unit + integration) with coverage
+# pytest (unit + integration); fails under 97% coverage. Writes coverage.xml
 [group('quality')]
 test-py:
-    uv run pytest --cov --cov-report=term
+    uv run pytest --cov --cov-report=term-missing:skip-covered --cov-report=xml
 
-# Vitest
+# Vitest; fails under 97% coverage. Writes apps/desktop/coverage/ (lcov + html)
 [group('quality')]
 test-ui:
-    pnpm --filter {{ desktop }} test
+    pnpm --filter {{ desktop }} test:cov
 
-# cargo test (permission policy, audio framing)
+# cargo test under cargo-llvm-cov; fails under 97% coverage. Writes src-tauri/target/lcov.info
 [group('quality')]
 test-rust:
+    cargo llvm-cov --manifest-path {{ tauri_manifest }} --locked --no-report
+    cargo llvm-cov report --manifest-path {{ tauri_manifest }} --ignore-filename-regex '{{ rust_cov_ignore }}' --summary-only --fail-under-lines {{ COVERAGE_MIN }} --fail-under-functions {{ COVERAGE_MIN }} --fail-under-regions {{ COVERAGE_MIN }}
+    cargo llvm-cov report --manifest-path {{ tauri_manifest }} --ignore-filename-regex '{{ rust_cov_ignore }}' --lcov --output-path apps/desktop/src-tauri/target/lcov.info
+
+# Fast test run without coverage (used by the pre-push hook)
+[group('quality')]
+test-fast:
+    uv run pytest -q
+    pnpm --filter {{ desktop }} test
     cargo test --manifest-path {{ tauri_manifest }} --locked
 
-# Regenerate apps/desktop/src/generated from vt_contracts
+# Known vulnerabilities in every lockfile, secrets and Dockerfile issues (needs Trivy installed)
+[group('quality')]
+security:
+    uv audit --locked --preview-features audit-command
+    pnpm audit --audit-level high
+    trivy fs --config trivy.yaml .
+
+# Regenerate the UI's API types: api OpenAPI schema -> apps/desktop/src/generated/api.d.ts
 [group('quality')]
 types:
-    @echo "not implemented yet: arrives with vt_contracts.ws in Phase 1 (docs/roadmap.md)"
+    uv run vt-api-openapi apps/desktop/openapi.json
+    pnpm --filter {{ desktop }} types
 
 # Model services in Docker; api (auto-reload) and UI (Vite) locally, in the browser
 [group('dev')]
@@ -98,31 +125,59 @@ _serve: dev-api dev-ui
 models:
     docker compose --profile {{ PROFILE }} up -d --build --wait --scale api=0
 
-# api on :8080 with auto-reload, using the model services published on localhost
-[env("VT_DB_PATH", "data/progress.db")]
+# api on :8080 with auto-reload, using the model services published on localhost. `just dev-api 0.0.0.0` also listens on your network, for the installed app on a phone (no login: trusted networks only)
+[env("VT_DATABASE_URL", "sqlite:///data/voice-tutor.db")]
 [env("VT_LLM_BASE_URL", LLM_DEV_URL)]
 [env("VT_NOTES_DIR", "data/notes")]
 [env("VT_PRON_BASE_URL", "http://localhost:8001")]
+[env("VT_SECRET_KEY_FILE", "data/secret.key")]
 [env("VT_STT_BASE_URL", "http://localhost:8000/v1")]
-[env("VT_TTS_BASE_URL", "http://localhost:8880/v1")]
+[env("VT_TTS_BASE_URL", "http://localhost:8000/v1")]
 [group('dev')]
-dev-api:
-    uv run uvicorn --factory vt_api.main:create_app --reload --reload-dir services/api/src --reload-dir packages/contracts/src --port 8080
+dev-api host="127.0.0.1":
+    uv run uvicorn --factory vt_api.main:create_app --reload --reload-dir services/api/src --reload-dir packages/contracts/src --host {{ host }} --port 8080
+
+# Speech on this machine: Speaches on :8000, waits until its models are downloaded (~700 MB the first time)
+[group('dev')]
+voice:
+    @echo "Starting Speaches. The first start downloads the speech models: docker compose logs -f {{ SPEECH }}"
+    docker compose --profile {{ PROFILE }} up -d --wait {{ SPEECH }}
+
+# Try it on your phone with a cloud chat model: `voice`, then the api and the HTTPS UI (`dev-lan`) together
+[group('dev')]
+dev-phone: voice _serve-lan
+
+[parallel]
+[private]
+_serve-lan: dev-api dev-lan
 
 # UI on http://localhost:1420 (Vite, hot reload)
 [group('dev')]
 dev-ui:
     pnpm --filter {{ desktop }} dev
 
+# UI for a phone on the same Wi-Fi: https://<this computer's IP>:1420 (self-signed, so the mic works). With `just dev-api`
+[env("VT_DEV_HTTPS", "1")]
+[group('dev')]
+dev-lan:
+    pnpm --filter {{ desktop }} dev --host
+
 # Tauri dev window (starts its own Vite). Backend: `just models` + `just dev-api`, or `just up`
 [group('dev')]
 desktop:
     pnpm --filter {{ desktop }} tauri dev
 
-# Installers for the current OS (CI builds Windows and Linux)
+# Installers for the current OS (CI builds Windows, Linux and Android)
 [group('release')]
 bundle:
     pnpm --filter {{ desktop }} tauri build
+
+# Set the release version in every package and lockfile: `just bump 0.2.0`, in the release PR
+[group('release')]
+bump version:
+    uv run --no-project scripts/version.py bump {{ version }}
+    uv lock
+    cargo update --workspace --offline --manifest-path {{ tauri_manifest }}
 
 # Full stack in Docker: `just up` or `just up amd`
 [group('docker')]

@@ -1,0 +1,2 @@
+# Consciously accepted findings. One ID per line, ALWAYS with the reason and a review date:
+# CVE-2026-12345 exp:2027-01-31  # transitive through X, not reachable from our code

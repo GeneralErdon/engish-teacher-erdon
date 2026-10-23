@@ -1,0 +1,34 @@
+name: Set up just
+description: The pinned just, downloaded from its release by direct URL and checked against a pinned SHA-256. No GitHub API call (listing releases through it failed now and then), and a tampered download stops the job.
+runs:
+  using: composite
+  steps:
+    - name: Install just
+      shell: bash
+      env:
+        # Bump the version and both checksums together (from the release's SHA256SUMS).
+        JUST_VERSION: 1.59.0
+        SHA256_LINUX_X64: 409044617b6f06517c1035e55ca38c8c856ff8b650e41bc2aa1ef82d5903a23e
+        SHA256_WINDOWS_X64: 9c5463e2d0974e31bee71346aa5cbf19167de1585a4abc1bae7b3b04604ea9c0
+      # The PATH entry is RUNNER_TEMP plus a pinned version: nothing a pull request controls.
+      run: | # zizmor: ignore[github-env]
+        set -euo pipefail
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          Linux-X64) target=x86_64-unknown-linux-musl.tar.gz sha256=$SHA256_LINUX_X64 binary=just ;;
+          Windows-X64) target=x86_64-pc-windows-msvc.zip sha256=$SHA256_WINDOWS_X64 binary=just.exe ;;
+          *) echo "::error::No pinned just build for $RUNNER_OS-$RUNNER_ARCH"; exit 1 ;;
+        esac
+        archive="just-$JUST_VERSION-$target"
+        dir="$RUNNER_TEMP/just-$JUST_VERSION"
+        mkdir -p "$dir"
+        curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
+          --output "$dir/$archive" "https://github.com/casey/just/releases/download/$JUST_VERSION/$archive"
+        echo "$sha256  $dir/$archive" | sha256sum --check --strict -
+        if [[ $archive == *.zip ]]; then
+          # Windows' own bsdtar reads zip; Git Bash's GNU tar does not.
+          "$WINDIR/System32/tar.exe" -xf "$dir/$archive" -C "$dir" "$binary"
+        else
+          tar -xzf "$dir/$archive" -C "$dir" "$binary"
+        fi
+        echo "$dir" >> "$GITHUB_PATH"
+        "$dir/$binary" --version

@@ -1,72 +1,32 @@
-import { useEffect, useState } from 'react'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { RouterProvider } from '@tanstack/react-router'
+import { LazyMotion, MotionConfig } from 'motion/react'
+import { useState } from 'react'
 
-import { fetchHealth, type HealthResponse } from '../lib/health'
-import { backendUrl } from '../lib/platform'
+import { createAppQueryClient } from './query-client'
+import { createAppRouter } from './router'
 
-type HealthState =
-  | { kind: 'checking' }
-  | { kind: 'online'; health: HealthResponse }
-  | { kind: 'offline'; reason: string }
+const loadMotionFeatures = () => import('./motion-features').then((module) => module.default)
 
 export interface AppProps {
-  apiUrl?: string
+  /** Tests inject their own (memory history, fresh cache). */
+  queryClient?: QueryClient
+  router?: ReturnType<typeof createAppRouter>
 }
 
-export function App({ apiUrl = backendUrl() }: AppProps) {
-  const [state, setState] = useState<HealthState>({ kind: 'checking' })
-  const [attempt, setAttempt] = useState(0)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    fetchHealth(apiUrl, controller.signal)
-      .then((health) => {
-        setState({ kind: 'online', health })
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return
-        setState({ kind: 'offline', reason: error instanceof Error ? error.message : 'unknown' })
-      })
-    return () => {
-      controller.abort()
-    }
-  }, [apiUrl, attempt])
-
-  const retry = () => {
-    setState({ kind: 'checking' })
-    setAttempt((n) => n + 1)
-  }
+export function App(props: AppProps) {
+  const [queryClient] = useState(() => props.queryClient ?? createAppQueryClient())
+  const [router] = useState(() => props.router ?? createAppRouter(queryClient))
 
   return (
-    <main className="shell">
-      <header>
-        <h1>voice-tutor</h1>
-        <p className="tagline">Your private English speaking coach</p>
-      </header>
-
-      <section className="status" aria-live="polite" data-state={state.kind}>
-        <span className="dot" aria-hidden="true" />
-        {state.kind === 'checking' && <p>Checking the API…</p>}
-        {state.kind === 'online' && (
-          <p>
-            API online <span className="muted">· v{state.health.version}</span>
-          </p>
-        )}
-        {state.kind === 'offline' && (
-          <div>
-            <p>API unreachable</p>
-            <p className="muted">
-              {state.reason}. Start it with <code>just dev-api</code> or <code>just up</code>.
-            </p>
-          </div>
-        )}
-      </section>
-
-      <footer>
-        <code className="muted">{apiUrl}</code>
-        <button type="button" onClick={retry} disabled={state.kind === 'checking'}>
-          Retry
-        </button>
-      </footer>
-    </main>
+    <QueryClientProvider client={queryClient}>
+      {/* `strict`: only the lightweight `m.*` components may be used. `reducedMotion`: honour
+          the OS setting, keeping opacity fades but dropping movement. */}
+      <LazyMotion features={loadMotionFeatures} strict>
+        <MotionConfig reducedMotion="user">
+          <RouterProvider router={router} />
+        </MotionConfig>
+      </LazyMotion>
+    </QueryClientProvider>
   )
 }

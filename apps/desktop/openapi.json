@@ -1,0 +1,1557 @@
+{
+  "components": {
+    "schemas": {
+      "ApiKeyPolicy": {
+        "enum": [
+          "required",
+          "optional"
+        ],
+        "type": "string"
+      },
+      "AssistantAudioDone": {
+        "additionalProperties": false,
+        "description": "No more audio for this reply.",
+        "properties": {
+          "interrupted": {
+            "default": false,
+            "title": "Interrupted",
+            "type": "boolean"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "assistant.audio.done",
+            "default": "assistant.audio.done",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "interrupted"
+        ],
+        "title": "AssistantAudioDone",
+        "type": "object"
+      },
+      "AssistantAudioStarted": {
+        "additionalProperties": false,
+        "description": "The tutor's voice for this reply follows as binary frames: PCM16 little-endian, mono, at\n`sample_rate`, sentence by sentence as the reply is generated.",
+        "properties": {
+          "sample_rate": {
+            "title": "Sample Rate",
+            "type": "integer"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "assistant.audio.started",
+            "default": "assistant.audio.started",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "sample_rate"
+        ],
+        "title": "AssistantAudioStarted",
+        "type": "object"
+      },
+      "AssistantTextDelta": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "assistant.text.delta",
+            "default": "assistant.text.delta",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "text"
+        ],
+        "title": "AssistantTextDelta",
+        "type": "object"
+      },
+      "AssistantTextDone": {
+        "additionalProperties": false,
+        "properties": {
+          "interrupted": {
+            "default": false,
+            "title": "Interrupted",
+            "type": "boolean"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "assistant.text.done",
+            "default": "assistant.text.done",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "text",
+          "interrupted"
+        ],
+        "title": "AssistantTextDone",
+        "type": "object"
+      },
+      "CefrLevel": {
+        "enum": [
+          "A1",
+          "A2",
+          "B1",
+          "B2",
+          "C1",
+          "C2"
+        ],
+        "type": "string"
+      },
+      "ClientEvent": {
+        "discriminator": {
+          "mapping": {
+            "input.commit": "#/components/schemas/InputCommit",
+            "input.interrupt": "#/components/schemas/InputInterrupt",
+            "input.text": "#/components/schemas/InputText",
+            "session.end": "#/components/schemas/SessionEnd",
+            "session.start": "#/components/schemas/SessionStart",
+            "session.update": "#/components/schemas/SessionUpdate"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SessionStart"
+          },
+          {
+            "$ref": "#/components/schemas/SessionUpdate"
+          },
+          {
+            "$ref": "#/components/schemas/InputText"
+          },
+          {
+            "$ref": "#/components/schemas/InputCommit"
+          },
+          {
+            "$ref": "#/components/schemas/InputInterrupt"
+          },
+          {
+            "$ref": "#/components/schemas/SessionEnd"
+          }
+        ]
+      },
+      "ConnectionTestRequest": {
+        "additionalProperties": false,
+        "description": "Body of `POST /v1/llm/test`.",
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "base_url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Base Url",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "model": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^\\S+$",
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "base_url",
+          "model"
+        ],
+        "title": "ConnectionTestRequest",
+        "type": "object"
+      },
+      "ConnectionTestResult": {
+        "additionalProperties": false,
+        "description": "Body of `POST /v1/llm/test`. A failed test is a normal result (`ok=False`), not an error.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "ConnectionTestResult",
+        "type": "object"
+      },
+      "Correction": {
+        "additionalProperties": false,
+        "description": "Feedback on the learner's message. `corrected == text` and no items: nothing to fix.",
+        "properties": {
+          "corrected": {
+            "title": "Corrected",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CorrectionItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "correction",
+            "default": "correction",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "corrected",
+          "items",
+          "latency_ms"
+        ],
+        "title": "Correction",
+        "type": "object"
+      },
+      "CorrectionItem": {
+        "additionalProperties": false,
+        "properties": {
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CorrectionKind"
+          },
+          "original": {
+            "title": "Original",
+            "type": "string"
+          },
+          "suggestion": {
+            "title": "Suggestion",
+            "type": "string"
+          }
+        },
+        "required": [
+          "original",
+          "suggestion",
+          "kind",
+          "explanation"
+        ],
+        "title": "CorrectionItem",
+        "type": "object"
+      },
+      "CorrectionKind": {
+        "enum": [
+          "grammar",
+          "vocabulary",
+          "spelling",
+          "naturalness"
+        ],
+        "type": "string"
+      },
+      "ErrorCode": {
+        "enum": [
+          "bad_event",
+          "not_started",
+          "llm_failed",
+          "stt_failed",
+          "tts_failed",
+          "no_speech",
+          "audio_too_short",
+          "audio_too_long"
+        ],
+        "type": "string"
+      },
+      "ErrorEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "type": {
+            "const": "error",
+            "default": "error",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "code",
+          "message",
+          "retryable"
+        ],
+        "title": "ErrorEvent",
+        "type": "object"
+      },
+      "ExplanationLanguage": {
+        "enum": [
+          "english",
+          "native"
+        ],
+        "type": "string"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "additionalProperties": false,
+        "description": "Body of `GET /healthz`.",
+        "properties": {
+          "service": {
+            "enum": [
+              "api",
+              "pron"
+            ],
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "const": "ok",
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service",
+          "version"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "InputCommit": {
+        "additionalProperties": false,
+        "description": "The learner finished speaking (push-to-talk released): transcribe the audio sent so far.\n\nAudio travels before this event as binary frames: PCM16 little-endian, mono, 16 kHz\n(`vt_contracts.audio`).",
+        "properties": {
+          "type": {
+            "const": "input.commit",
+            "default": "input.commit",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type"
+        ],
+        "title": "InputCommit",
+        "type": "object"
+      },
+      "InputInterrupt": {
+        "additionalProperties": false,
+        "description": "Stop the tutor's current reply (the learner started a new turn or pressed stop).",
+        "properties": {
+          "type": {
+            "const": "input.interrupt",
+            "default": "input.interrupt",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type"
+        ],
+        "title": "InputInterrupt",
+        "type": "object"
+      },
+      "InputText": {
+        "additionalProperties": false,
+        "description": "A typed message from the learner.",
+        "properties": {
+          "text": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "input.text",
+            "default": "input.text",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "text"
+        ],
+        "title": "InputText",
+        "type": "object"
+      },
+      "LearnerProfile": {
+        "additionalProperties": false,
+        "description": "What the learner can change from the UI. Body of `PUT /v1/learner`.",
+        "properties": {
+          "explanations": {
+            "$ref": "#/components/schemas/ExplanationLanguage"
+          },
+          "level": {
+            "$ref": "#/components/schemas/CefrLevel"
+          }
+        },
+        "required": [
+          "level",
+          "explanations"
+        ],
+        "title": "LearnerProfile",
+        "type": "object"
+      },
+      "LearnerProfileView": {
+        "additionalProperties": false,
+        "description": "Body of `GET`/`PUT /v1/learner`.",
+        "properties": {
+          "explanations": {
+            "$ref": "#/components/schemas/ExplanationLanguage"
+          },
+          "level": {
+            "$ref": "#/components/schemas/CefrLevel"
+          },
+          "native_language": {
+            "title": "Native Language",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "environment",
+              "saved"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "explanations",
+          "native_language",
+          "source"
+        ],
+        "title": "LearnerProfileView",
+        "type": "object"
+      },
+      "LlmSettingsView": {
+        "additionalProperties": false,
+        "description": "Body of `GET`/`PUT /v1/llm/settings`.",
+        "properties": {
+          "active": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderSettingsView"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "source": {
+            "enum": [
+              "environment",
+              "saved"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "active",
+          "source",
+          "providers"
+        ],
+        "title": "LlmSettingsView",
+        "type": "object"
+      },
+      "ModelList": {
+        "additionalProperties": false,
+        "description": "Body of `POST /v1/llm/models`: model ids exactly as the provider expects them, sorted.",
+        "properties": {
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "title": "ModelList",
+        "type": "object"
+      },
+      "ModelStatus": {
+        "additionalProperties": false,
+        "description": "Whether one speech server answers and has its model.",
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "model_ready": {
+            "title": "Model Ready",
+            "type": "boolean"
+          },
+          "reachable": {
+            "title": "Reachable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "base_url",
+          "model",
+          "reachable",
+          "model_ready"
+        ],
+        "title": "ModelStatus",
+        "type": "object"
+      },
+      "ProblemDetail": {
+        "additionalProperties": false,
+        "description": "Error body (`{\"detail\": ...}`), as FastAPI's `HTTPException` renders it.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ProblemDetail",
+        "type": "object"
+      },
+      "ProviderConnection": {
+        "additionalProperties": false,
+        "description": "Enough to reach a provider: body of `POST /v1/llm/models`.",
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "base_url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Base Url",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          }
+        },
+        "required": [
+          "kind",
+          "base_url"
+        ],
+        "title": "ProviderConnection",
+        "type": "object"
+      },
+      "ProviderInfo": {
+        "additionalProperties": false,
+        "description": "One entry of `GET /v1/llm/providers`: what the settings form needs to render a preset.",
+        "properties": {
+          "api_key": {
+            "$ref": "#/components/schemas/ApiKeyPolicy"
+          },
+          "api_key_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Url"
+          },
+          "base_url_hint": {
+            "title": "Base Url Hint",
+            "type": "string"
+          },
+          "default_base_url": {
+            "title": "Default Base Url",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/WireProtocol"
+          },
+          "suggested_model": {
+            "title": "Suggested Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "description",
+          "protocol",
+          "default_base_url",
+          "base_url_hint",
+          "api_key",
+          "api_key_url",
+          "suggested_model"
+        ],
+        "title": "ProviderInfo",
+        "type": "object"
+      },
+      "ProviderKind": {
+        "enum": [
+          "ollama",
+          "ollama_cloud",
+          "openai",
+          "anthropic",
+          "gemini",
+          "openai_compatible",
+          "anthropic_compatible"
+        ],
+        "type": "string"
+      },
+      "ProviderSettingsInput": {
+        "additionalProperties": false,
+        "description": "Body of `PUT /v1/llm/settings`: save this provider and make it the active one.\n\n`api_key`: `None` keeps the saved key, `\"\"` removes it, anything else replaces it.",
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "base_url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Base Url",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "model": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^\\S+$",
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "base_url",
+          "model"
+        ],
+        "title": "ProviderSettingsInput",
+        "type": "object"
+      },
+      "ProviderSettingsView": {
+        "additionalProperties": false,
+        "description": "A provider's saved settings, without the key.",
+        "properties": {
+          "api_key_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Hint"
+          },
+          "api_key_set": {
+            "title": "Api Key Set",
+            "type": "boolean"
+          },
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "base_url",
+          "model",
+          "api_key_set",
+          "api_key_hint"
+        ],
+        "title": "ProviderSettingsView",
+        "type": "object"
+      },
+      "ServerEvent": {
+        "discriminator": {
+          "mapping": {
+            "assistant.audio.done": "#/components/schemas/AssistantAudioDone",
+            "assistant.audio.started": "#/components/schemas/AssistantAudioStarted",
+            "assistant.text.delta": "#/components/schemas/AssistantTextDelta",
+            "assistant.text.done": "#/components/schemas/AssistantTextDone",
+            "correction": "#/components/schemas/Correction",
+            "error": "#/components/schemas/ErrorEvent",
+            "session.ready": "#/components/schemas/SessionReady",
+            "transcript.final": "#/components/schemas/TranscriptFinal",
+            "turn.metrics": "#/components/schemas/TurnMetrics"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SessionReady"
+          },
+          {
+            "$ref": "#/components/schemas/TranscriptFinal"
+          },
+          {
+            "$ref": "#/components/schemas/AssistantTextDelta"
+          },
+          {
+            "$ref": "#/components/schemas/AssistantTextDone"
+          },
+          {
+            "$ref": "#/components/schemas/AssistantAudioStarted"
+          },
+          {
+            "$ref": "#/components/schemas/AssistantAudioDone"
+          },
+          {
+            "$ref": "#/components/schemas/Correction"
+          },
+          {
+            "$ref": "#/components/schemas/TurnMetrics"
+          },
+          {
+            "$ref": "#/components/schemas/ErrorEvent"
+          }
+        ]
+      },
+      "SessionEnd": {
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "session.end",
+            "default": "session.end",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type"
+        ],
+        "title": "SessionEnd",
+        "type": "object"
+      },
+      "SessionReady": {
+        "additionalProperties": false,
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/CefrLevel"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "type": {
+            "const": "session.ready",
+            "default": "session.ready",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "level",
+          "provider",
+          "model"
+        ],
+        "title": "SessionReady",
+        "type": "object"
+      },
+      "SessionStart": {
+        "additionalProperties": false,
+        "description": "Begin a conversation. Level and explanation language come from the learner profile.",
+        "properties": {
+          "speak": {
+            "default": false,
+            "title": "Speak",
+            "type": "boolean"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Topic"
+          },
+          "type": {
+            "const": "session.start",
+            "default": "session.start",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "topic",
+          "speak"
+        ],
+        "title": "SessionStart",
+        "type": "object"
+      },
+      "SessionUpdate": {
+        "additionalProperties": false,
+        "description": "Change session options. Applies from the next reply: to silence the current one, the\nclient stops playing it.",
+        "properties": {
+          "speak": {
+            "title": "Speak",
+            "type": "boolean"
+          },
+          "type": {
+            "const": "session.update",
+            "default": "session.update",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "speak"
+        ],
+        "title": "SessionUpdate",
+        "type": "object"
+      },
+      "SpeechStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "recognition": {
+            "$ref": "#/components/schemas/ModelStatus"
+          },
+          "synthesis": {
+            "$ref": "#/components/schemas/ModelStatus"
+          }
+        },
+        "required": [
+          "recognition",
+          "synthesis"
+        ],
+        "title": "SpeechStatus",
+        "type": "object"
+      },
+      "TranscriptFinal": {
+        "additionalProperties": false,
+        "description": "What the learner said (or typed) in this turn, as the server will use it.",
+        "properties": {
+          "source": {
+            "enum": [
+              "text",
+              "voice"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "stt_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stt Ms"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "transcript.final",
+            "default": "transcript.final",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "text",
+          "source",
+          "stt_ms"
+        ],
+        "title": "TranscriptFinal",
+        "type": "object"
+      },
+      "TurnMetrics": {
+        "additionalProperties": false,
+        "description": "Latency of the tutor's reply, in milliseconds, from the learner's message (Phase 0).\n\nSent once the reply is complete, its audio included. For a spoken turn, the voice-to-voice\nlatency is `transcript.final.stt_ms + first_audio_ms`.",
+        "properties": {
+          "first_audio_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "First Audio Ms"
+          },
+          "first_token_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Token Ms"
+          },
+          "reply_ms": {
+            "title": "Reply Ms",
+            "type": "integer"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "turn.metrics",
+            "default": "turn.metrics",
+            "title": "Type",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "type",
+          "turn_id",
+          "first_token_ms",
+          "reply_ms",
+          "first_audio_ms"
+        ],
+        "title": "TurnMetrics",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WireProtocol": {
+        "enum": [
+          "openai",
+          "ollama",
+          "anthropic"
+        ],
+        "type": "string"
+      }
+    }
+  },
+  "info": {
+    "title": "voice-tutor api",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/healthz": {
+      "get": {
+        "description": "Liveness only. Readiness (every model endpoint reachable) arrives with the container.",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Healthz",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/v1/learner": {
+      "get": {
+        "operationId": "get_learner_v1_learner_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearnerProfileView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Learner",
+        "tags": [
+          "learner"
+        ]
+      },
+      "put": {
+        "operationId": "save_learner_v1_learner_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LearnerProfile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearnerProfileView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Learner",
+        "tags": [
+          "learner"
+        ]
+      }
+    },
+    "/v1/llm/models": {
+      "post": {
+        "description": "The provider's models. POST because the body may carry an API key.",
+        "operationId": "list_models_v1_llm_models_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderConnection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "List Models",
+        "tags": [
+          "llm"
+        ]
+      }
+    },
+    "/v1/llm/providers": {
+      "get": {
+        "description": "Every supported provider, in display order.",
+        "operationId": "list_providers_v1_llm_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderInfo"
+                  },
+                  "title": "Response List Providers V1 Llm Providers Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Providers",
+        "tags": [
+          "llm"
+        ]
+      }
+    },
+    "/v1/llm/settings": {
+      "delete": {
+        "description": "Forget the settings saved from the UI, API keys included; the environment applies.",
+        "operationId": "reset_settings_v1_llm_settings_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reset Settings",
+        "tags": [
+          "llm"
+        ]
+      },
+      "get": {
+        "operationId": "get_settings_v1_llm_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Settings",
+        "tags": [
+          "llm"
+        ]
+      },
+      "put": {
+        "description": "Save a provider's settings and make it the active one.",
+        "operationId": "save_settings_v1_llm_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderSettingsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Incomplete settings"
+          }
+        },
+        "summary": "Save Settings",
+        "tags": [
+          "llm"
+        ]
+      }
+    },
+    "/v1/llm/test": {
+      "post": {
+        "description": "Ask the model for one short sentence and time it.",
+        "operationId": "test_connection_v1_llm_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Connection",
+        "tags": [
+          "llm"
+        ]
+      }
+    },
+    "/v1/speech/status": {
+      "get": {
+        "description": "Whether each speech server answers and has its model: speech-to-text for the learner's\nvoice, text-to-speech for the tutor's.",
+        "operationId": "speech_status_v1_speech_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Speech Status",
+        "tags": [
+          "speech"
+        ]
+      }
+    }
+  }
+}

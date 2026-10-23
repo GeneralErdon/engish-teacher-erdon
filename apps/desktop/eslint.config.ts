@@ -25,6 +25,34 @@ export default defineConfig(
       },
     },
   },
+  {
+    files: ['**/*.{ts,tsx}'],
+    rules: {
+      // Conflicts with `no-non-null-assertion` (strict), which wins: prefer explicit casts to `!`.
+      '@typescript-eslint/non-nullable-type-assertion-style': 'off',
+      // `''` is "not set" in form fields and API strings, so `||` on strings is intended.
+      '@typescript-eslint/prefer-nullish-coalescing': [
+        'error',
+        { ignorePrimitives: { string: true } },
+      ],
+    },
+  },
+  {
+    // shadcn/ui components export their `cva` variants next to the component, by design.
+    files: ['src/components/ui/**/*.tsx'],
+    rules: {
+      'react-refresh/only-export-components': [
+        'error',
+        { allowExportNames: ['buttonVariants', 'badgeVariants'] },
+      ],
+    },
+  },
+  {
+    // Audio worklets: plain JavaScript modules for the audio thread (see the file header).
+    files: ['public/**/*.worklet.js'],
+    extends: [js.configs.recommended],
+    languageOptions: { globals: globals.audioWorklet },
+  },
   // Last: turn off stylistic rules that Prettier owns.
   prettier,
 )

@@ -1,5 +1,13 @@
 # voice-tutor
 
+[![CI](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/codeql.yml/badge.svg?branch=develop)](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/codeql.yml)
+[![Security](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/security.yml/badge.svg?branch=develop)](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/security.yml)
+[![codecov](https://codecov.io/gh/GeneralErdon/engish-teacher-erdon/branch/develop/graph/badge.svg)](https://codecov.io/gh/GeneralErdon/engish-teacher-erdon)
+![coverage floor](https://img.shields.io/badge/coverage%20floor-97%25-brightgreen)
+![Python 3.14](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white)
+![Tauri 2](https://img.shields.io/badge/tauri-2-24C8DB?logo=tauri&logoColor=white)
+
 > A private, self-hosted **English speaking coach**. Talk to it by voice, get grammar corrections, and practise pronunciation with **phoneme-level feedback**, all on your own machine.
 
 Your audio never leaves your computer. No accounts, no telemetry, no subscriptions.
@@ -39,13 +47,13 @@ Planned scope (see [Status](#voice-tutor) above):
 
 ```
 Desktop app (Tauri 2 + React) — or the same UI in a browser (home lab)
-   │  mic capture · playback · Markdown notes · progress
+   │  mic capture · voice activity detection (call mode) · playback · Markdown notes · progress
    │  WebSocket: binary PCM16 audio + typed JSON events
    ▼
-api (FastAPI) ── VAD · turn-taking · barge-in · teacher logic · notes · progress (SQLite)
+api (FastAPI) ── turns · streamed replies and voice · barge-in · teacher logic · notes · progress (SQLite)
    ├─► stt   speech-to-text   (Speaches / faster-whisper, or whisper.cpp)
    ├─► llm   chat model       (Ollama, llama.cpp server, LM Studio, or any OpenAI-compatible API)
-   ├─► tts   text-to-speech   (Kokoro-FastAPI)
+   ├─► tts   text-to-speech   (Kokoro, served by the same Speaches)
    └─► pron  pronunciation scoring (wav2vec2 phoneme recognition + alignment) — this repo
 ```
 
@@ -149,17 +157,16 @@ docker compose --profile cpu up -d    # use the profile you set: cpu | nvidia | 
 
 Or, with `just` installed: `just up` (it reads `VT_PROFILE` from `.env`, builds and waits until every service is healthy).
 
-Then open **http://localhost:8080**. Today it shows the backend status; voice arrives in Phase 1.
+Then open **http://localhost:8080**: pick a language model in **Settings**, then talk to your tutor in **Practice**. Speaking needs the one-time [voice setup](docs/configuration.md#voice-setup).
 
-The first start downloads several GB (images, then the chat model). Follow it with `docker compose logs -f`. Every port is published on `127.0.0.1` only:
+The first start downloads several GB (images, then the chat model). The `api` comes up right away; each model service turns `healthy` in `docker compose ps` once its model is ready. Follow the downloads with `docker compose logs -f`. Every port is published on `127.0.0.1` only:
 
 | Port | Service |
 |---|---|
 | 8080 | `api` + UI |
 | 8001 | `pron` |
-| 8000 | `stt` (Speaches) |
+| 8000 | `stt` and `tts` (Speaches: Whisper and Kokoro) |
 | 8081 | `llm` (llama.cpp / Ollama) |
-| 8880 | `tts` (Kokoro) |
 
 Stop everything with `docker compose --profile "*" down` (or `just down`). Downloaded models stay in Docker volumes for the next start.
 
@@ -178,13 +185,16 @@ Then pick how much of the stack you need:
 
 | You want to | Run | Open |
 |---|---|---|
-| Work on the UI or the api (no models needed yet) | `just dev-api` and, in a second terminal, `just dev-ui` | http://localhost:1420 |
+| Work on the UI or the api, or chat by text with a cloud model | `just dev-api` and, in a second terminal, `just dev-ui` | http://localhost:1420 |
+| Also talk: speak, and hear the tutor (local speech recognition and voice) | `just voice` once ([voice setup](docs/configuration.md#voice-setup)), then the above | http://localhost:1420 |
 | The full loop: models in Docker, api and UI local | `just dev` | http://localhost:1420 |
+| Try it on your phone (same Wi-Fi), with a cloud chat model | `just dev-phone` (= `voice`, then `dev-api` + `dev-lan`) | https://&lt;your computer's IP&gt;:1420 (accept the self-signed certificate once) |
 | The desktop window | `just dev-api` (or `just models` + `just dev-api`), then `just desktop` | native window |
 | Production images with rebuild on change | `just watch` | http://localhost:8080 |
 
 - `just dev-api` runs uvicorn with auto-reload on http://localhost:8080 (API docs at `/docs`).
-- `just dev-ui` runs Vite with hot reload on http://localhost:1420.
+- `just dev-ui` runs Vite with hot reload on http://localhost:1420. It forwards `/v1`, `/healthz` and `/ws` to the api, so the page talks to one origin.
+- `just dev-lan` is `dev-ui` on every network interface, over HTTPS with a self-signed certificate: phones only open the microphone on secure pages. The api stays on localhost; the phone reaches it through Vite. Vite prints the address under `Network`.
 - `just dev` = `just models` (pron + model services in Docker, waits until healthy) + `dev-api` + `dev-ui` in parallel.
 - `just desktop` starts its own Vite, so do not run it together with `just dev` or `just dev-ui`: both want port 1420.
 
@@ -192,13 +202,33 @@ Adding dependencies, code conventions, testing strategy and typing rules: [docs/
 
 ## Desktop app and installers
 
-There are **no precompiled installers yet**: the release workflow (`.github/workflows/release.yml`) publishes them, with the Docker images, from the first tagged release in Phase 3. Until then, build them on your machine:
+**Download:** every release puts the apps on the [**Releases**](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest) page, no sign-in needed. These links always get the newest one:
+
+| Platform | Files |
+|---|---|
+| Windows | [Installer (.exe)](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-windows-x64-setup.exe) · [.msi](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-windows-x64.msi) |
+| Linux | [.AppImage](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-linux-x86_64.AppImage) · [.deb](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-linux-amd64.deb) · [.rpm](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-linux-x86_64.rpm) |
+| Android (arm64) | [.apk](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-android-arm64.apk) |
+
+The installers are not code-signed yet, so Windows SmartScreen asks for confirmation. To try a branch between releases, build it on GitHub's machines: `gh workflow run apps.yml --ref <branch>` (or **Run workflow** on the [Apps workflow](https://github.com/GeneralErdon/engish-teacher-erdon/actions/workflows/apps.yml)), then download the apps from the run's **Artifacts** (signed in to GitHub, kept 30 days).
+
+Or build them on your machine:
 
 ```bash
 just bundle
 ```
 
-Output goes to `apps/desktop/src-tauri/target/release/bundle/`: `.deb`, `.rpm` and `.AppImage` on Linux; `.msi` and `.exe` (NSIS) on Windows. The app talks to the backend at `http://localhost:8080`, so start it with Docker or `just dev-api` first.
+Output goes to `apps/desktop/src-tauri/target/release/bundle/`: `.deb`, `.rpm` and `.AppImage` on Linux; `.msi` and `.exe` (NSIS) on Windows. The app talks to the backend at `http://localhost:8080` by default, so start it with Docker or `just dev-api` first. To use a backend on another computer of your network, set its address in **Settings → Backend** (the app checks it before switching) and run the api there with `just dev-api 0.0.0.0`: it then listens on the network, which has no login, so only do it on networks you trust.
+
+**On an Android phone:**
+
+1. On the computer: `just voice` once, then `just dev-api 0.0.0.0`, so the api listens on your network (no login: trusted networks only).
+2. On the phone: download the [`.apk`](https://github.com/GeneralErdon/engish-teacher-erdon/releases/latest/download/voice-tutor-android-arm64.apk) and open it. Android asks to allow installing apps from that source, the first time.
+3. In the app: **Settings → Backend**, enter the computer's address (`192.168.x.x:8080`) and **Check and use**. The first call asks for the microphone.
+
+Every APK is signed with the same key, so a new release installs over the previous one and keeps your settings.
+
+Today the apps are **clients**: the installer contains the window and the UI, not the models. An all-in-one installer is planned for Phase 4: it starts the backend by itself and downloads the models on first run, with no Docker ([why and how](docs/architecture.md#distribution)).
 
 ## Configuration
 
@@ -207,14 +237,16 @@ All settings live in `.env`, starting from [`.env.example`](.env.example). They 
 | Variable | Default | Description |
 |---|---|---|
 | `VT_PROFILE` | `cpu` | Hardware profile (see below). |
-| `VT_LLM_BASE_URL` | `http://llm:8080/v1` | Any OpenAI-compatible chat endpoint. |
+| `VT_LLM_PROVIDER` | `openai_compatible` | `ollama`, `ollama_cloud`, `openai`, `anthropic`, `gemini`, `openai_compatible` or `anthropic_compatible`. Easier: pick it in the app under **Settings → Language model**, which wins over these variables ([details](docs/configuration.md#chat-model-providers)). |
+| `VT_LLM_BASE_URL` | `http://llm:8080/v1` | The provider's base URL. |
 | `VT_LLM_MODEL` | `gemma-3-4b-it-q4` | Model name as the endpoint expects it (`gemma-3-12b-it-q4` on a 12–16 GB GPU). |
-| `VT_LLM_API_KEY` | *(empty)* | Only for cloud providers. |
+| `VT_LLM_API_KEY` | *(empty)* | For providers that need one. Keys saved in the app stay in the backend, [encrypted](docs/configuration.md#encryption) (SQLCipher + AES-256-GCM, master key in the OS keyring). |
 | `VT_LLM_HF_REPO` | `ggml-org/gemma-3-4b-it-GGUF` | GGUF that llama.cpp downloads (`cpu` / `amd` profiles). |
 | `VT_STT_BASE_URL` | `http://stt:8000/v1` | Speech-to-text endpoint. |
-| `VT_STT_MODEL` | `large-v3-turbo` | Whisper variant (`.env.example` uses `small.en` for CPU). |
-| `VT_TTS_BASE_URL` | `http://tts:8880/v1` | Text-to-speech endpoint. |
-| `VT_TTS_VOICE` | `af_heart` | Teacher voice. |
+| `VT_STT_MODEL` | `Systran/faster-distil-whisper-small.en` | Speaches model id, downloaded once ([voice setup](docs/configuration.md#voice-setup)). |
+| `VT_TTS_BASE_URL` | `http://tts:8000/v1` | Text-to-speech endpoint (the same Speaches). |
+| `VT_TTS_MODEL` | `speaches-ai/Kokoro-82M-v1.0-ONNX` | The tutor's voice, downloaded once ([voice setup](docs/configuration.md#voice-setup)). |
+| `VT_TTS_VOICE` | `af_heart` | Tutor voice (American or British English). |
 | `VT_PRON_BASE_URL` | `http://pron:8001` | Pronunciation scoring service. |
 | `VT_NOTES_DIR` | `/data/notes` | Where session notes are written (mount it into your Obsidian vault if you like). |
 
@@ -244,7 +276,7 @@ Run `just` to list everything. The main recipes:
 | `just setup` | Install every dependency (uv, pnpm) and the git hooks |
 | `just fmt` | Format Python, TypeScript and Rust |
 | `just check` | ruff, mypy --strict, import-linter, ESLint, tsc, Prettier, cargo fmt, clippy |
-| `just test` | pytest (with coverage), Vitest, cargo test |
+| `just test` | pytest, Vitest, cargo test; each fails under **97 % coverage** |
 | `just dev` | Models in Docker + api and UI locally |
 | `just dev-api` / `just dev-ui` | One half of `just dev` |
 | `just desktop` | Tauri dev window |
@@ -252,7 +284,7 @@ Run `just` to list everything. The main recipes:
 | `just up [profile]` / `just watch [profile]` / `just down` | Full stack in Docker / with Compose Watch / stop it |
 | `just eval` | Evaluations and README results table *(Phase 2)* |
 
-CI (`.github/workflows/ci.yml`) runs the same `check` and `test` recipes on every push and pull request, compiles the desktop shell on Ubuntu **and Windows**, and builds both Docker images.
+CI runs the same `check` and `test` recipes on every pull request and every push to `master`/`develop`, compiles the desktop shell on Ubuntu **and Windows**, builds both Docker images, and scans dependencies, secrets and code (Trivy, CodeQL, dependency review). Everything that runs, what blocks a merge, and how it maps to the git hooks: [.github/README.md](.github/README.md).
 
 ## Project layout
 
@@ -275,12 +307,15 @@ The full tree, with what each module will contain, is in [docs/architecture.md](
 
 | Symptom | Fix |
 |---|---|
-| `Port 1420 is already in use` when running `just desktop` | `just dev` or `just dev-ui` is already running Vite. Stop it; `just desktop` starts its own. |
+| `Port 1420 is already in use` when running `just desktop` | `just dev`, `just dev-ui` or `just dev-lan` is already running Vite. Stop it; `just desktop` starts its own. |
+| The phone cannot open `https://<IP>:1420` | Same Wi-Fi (not a guest network that isolates devices)? On Fedora Workstation the firewall allows ports above 1024; elsewhere, open TCP 1420. Then accept the certificate warning once. |
+| No sound from the tutor on an iPhone | The silent switch mutes web audio: turn it off. |
 | The app says **API unreachable** | Start the backend: `just dev-api` (local) or `just up` (Docker). Check `curl http://localhost:8080/healthz`. |
 | Rust build fails with `webkit2gtk-4.1` / `javascriptcoregtk` not found | The Tauri system libraries are missing: see [Install the toolchain](#install-the-toolchain). |
 | `pnpm.ps1 cannot be loaded because running scripts is disabled` (Windows, outside `just`) | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. The `justfile` already bypasses it for its own recipes. |
 | `api` cannot write to `./data` | The container runs as uid 1000. If your user has another uid: `docker compose build --build-arg APP_UID=$(id -u) api`. |
 | `docker compose up --wait` takes a long time on first start | It is downloading models. Watch `docker compose logs -f llm-cpu` (or your profile's service). |
+| The chat model download stops progressing (`download failed: Failed to read connection`) | `docker compose restart llm-cpu` resumes it; what was already downloaded stays in the `voice-tutor_llm-models` volume. |
 | `uv: command not found` / `just: command not found` after installing | Open a new terminal, or add `~/.local/bin` (and `~/.cargo/bin` for Rust) to your `PATH`. |
 
 ## Results
@@ -304,7 +339,7 @@ What is measured:
 
 ## Contributing
 
-Git flow: `master` holds releases, `develop` is the integration branch, and every change gets its own `feat/<name>` or `fix/<name>` branch from `develop`, merged back by pull request with CI green ([details](docs/development.md#branches-and-commits-git-flow)). Conventional Commits (`feat:`, `fix:`, `docs:`…), small PRs with tests, and `just check test` green before pushing; the pre-commit hooks installed by `just setup` catch most issues on commit. Architecture changes get a short ADR in [docs/architecture.md](docs/architecture.md#architecture-decisions-summary).
+See [CONTRIBUTING.md](CONTRIBUTING.md) (setup, branches, commits, tests) and [SECURITY.md](SECURITY.md) for reporting vulnerabilities. In short: git flow: `master` holds releases, `develop` is the integration branch, and every change gets its own `feat/<name>` or `fix/<name>` branch from `develop`, merged back by pull request with CI green ([details](docs/development.md#branches-and-commits-git-flow)). Conventional Commits (`feat:`, `fix:`, `docs:`…), small PRs with tests, and `just check test` green before pushing; the pre-commit hooks installed by `just setup` catch most issues on commit. Architecture changes get a short ADR in [docs/architecture.md](docs/architecture.md#architecture-decisions-summary).
 
 ## Privacy
 

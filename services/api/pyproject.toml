@@ -5,15 +5,25 @@ description = "voice-tutor API: realtime voice session, teacher logic, notes and
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
+    "alembic>=1.20.0",
+    "anthropic>=1.14.0",
+    "anyio>=4.15.1",
+    "cryptography>=50.0.2",
     "fastapi>=0.153.0",
+    "httpx2>=2.15.1",
+    "keyring>=25.7.0",
+    "openai>=3.31.0",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.1",
+    "sqlalchemy>=2.1.4",
+    "sqlcipher3>=0.6.4",
     "uvicorn[standard]>=0.54.0",
     "vt-contracts",
 ]
 
 [project.scripts]
 vt-api = "vt_api.__main__:main"
+vt-api-openapi = "vt_api.openapi:main"
 
 [tool.uv.sources]
 vt-contracts = { workspace = true }

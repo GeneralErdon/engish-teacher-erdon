@@ -15,14 +15,16 @@ Versions were verified on **2026-10-20** (Phase -1). Bump them on purpose, never
 | Tests | **pytest 9**, pytest-asyncio, pytest-cov, hypothesis (property tests), httpx2 (ASGI client) | Vitest + Testing Library (jsdom); `cargo test` |
 | Tensor typing | `jaxtyping` + `beartype`, added with torch in Phase 2 | — |
 | Tasks | [**just**](https://just.systems) (`justfile`): one entry point on Linux, macOS and **Windows** (make does not run natively there) | |
-| Hooks | pre-commit (ruff, mypy, import-linter, uv-lock, eslint, prettier, cargo fmt, large-file and private-key guards) | |
+| Hooks | **pre-commit** in three stages: format/lint/secrets on commit, commitlint on the message, types/architecture/tests on push ([.github/README.md](../.github/README.md#hooks-vs-ci)) | commitlint (Conventional Commits) |
+| Coverage | pytest-cov, **≥ 97 %** | Vitest v8 and cargo-llvm-cov, **≥ 97 %** |
+| CI/CD | GitHub Actions: `ci.yml`, `security.yml` (uv audit, pnpm audit, Trivy, dependency review), `codeql.yml`, `apps.yml` (installers and APK), `release.yml` (every merge into `master`); Codecov | |
 
 Notes on choices that are not the newest thing available:
 
 - **TypeScript 6.0, not 7.** TypeScript 7 (the Go-native compiler) is out, but `typescript-eslint` supports `typescript <6.1`, and type-aware linting matters more here than compile speed. Move to 7 when `typescript-eslint` does.
 - **ESLint, not oxlint.** `create-vite` now defaults to oxlint (faster, fewer type-aware rules). Kept ESLint + `typescript-eslint` strict type-checked as the docs specified; revisit if lint time becomes a problem.
 - **mypy, not ty.** Astral's `ty` is still beta (0.0.x, `Development Status :: 4 - Beta`). It can be tried with `uvx ty check`, but mypy `--strict` stays the gate until ty is stable.
-- **httpx2.** Starlette 1.x prefers `httpx2` (the maintained fork) for its test client; `respx` still targets `httpx`, so the HTTP-mocking library for adapter contract tests is chosen in Phase 1 together with the adapters' HTTP client.
+- **httpx2, no respx.** `httpx2` is the maintained fork of `httpx`: Starlette 1.x uses it for its test client, and the `openai` and `anthropic` SDKs are built on it. Adapter contract tests fake providers with its built-in `httpx2.MockTransport` (canned responses, every request recorded), so `respx`, which still targets `httpx`, is not needed.
 
 ### First-time setup
 
@@ -58,10 +60,15 @@ Run `just` to list them. The Docker profile comes from `VT_PROFILE` in `.env` (d
 | `just setup` | `uv sync --all-packages`, `pnpm install`, `pre-commit install` |
 | `just fmt` | ruff (fix + format), prettier, cargo fmt |
 | `just check` | ruff, mypy --strict, import-linter, eslint, tsc, prettier --check, cargo fmt --check, clippy (`check-py`, `check-ui`, `check-rust` run each part) |
-| `just test` | pytest with coverage, vitest, cargo test (`test-py`, `test-ui`, `test-rust`) |
-| `just types` | Regenerate `apps/desktop/src/generated` from `vt_contracts` *(Phase 1)* |
+| `just test` | pytest, Vitest and cargo test, each **failing under 97 % coverage** (`test-py`, `test-ui`, `test-rust`) |
+| `just test-fast` | The three suites without coverage (what the pre-push hook runs) |
+| `just security` | `uv audit` + `pnpm audit` + Trivy (CI policy in `trivy.yaml`): known vulnerabilities, secrets, Dockerfiles. Needs [Trivy](https://trivy.dev) installed |
+| `just types` | Regenerate the UI's API types: the api's OpenAPI schema (`vt-api-openapi`, no server needed) → `apps/desktop/openapi.json` → `src/generated/api.d.ts` (openapi-typescript). With the api running, `pnpm --filter @voice-tutor/desktop types:live` reads `/openapi.json` from it instead |
 | `just dev` | `pron` and the profile's model services in Docker; `api` (uvicorn --reload) and the UI (Vite, http://localhost:1420) locally |
-| `just dev-api` / `just dev-ui` | One half of `just dev` |
+| `just dev-api` / `just dev-ui` | One half of `just dev`. `just dev-api 0.0.0.0` listens on the network too, for the installed app on another device (no login: trusted networks only). Vite forwards `/v1`, `/healthz` and `/ws` to the api (`VT_API_URL`, default `http://localhost:8080`), so in a browser the page and the api share one origin |
+| `just dev-lan` | `dev-ui` for a phone on the same Wi-Fi: every interface, HTTPS with a self-signed certificate (`@vitejs/plugin-basic-ssl`), because `getUserMedia` needs a secure page. Run it with `just dev-api` |
+| `just voice` | Speaches (speech recognition + the tutor's voice) in Docker on :8000; waits until both models are downloaded (first start only) |
+| `just dev-phone` | `voice`, then `dev-api` and `dev-lan` together: the whole loop on a phone with a cloud chat model |
 | `just desktop` | `tauri dev` window (it starts its own Vite on :1420, so do not combine it with `just dev`; run `just models` + `just dev-api`, or `just up`, for the backend) |
 | `just bundle` | `tauri build` installers for the current OS (CI builds Windows + Linux) |
 | `just up [profile]` | Full stack in Docker (`just up amd`) |
@@ -71,7 +78,7 @@ Run `just` to list them. The Docker profile comes from `VT_PROFILE` in `.env` (d
 
 `just dev` vs `just watch`: `dev` runs the api on your machine with instant reload and a debugger-friendly process; `watch` runs exactly the production images and rebuilds them on change (a few seconds, thanks to the uv and pnpm cache mounts).
 
-CI (`.github/workflows/ci.yml`) runs `just check-*` and `just test-*` per stack, Rust on Ubuntu **and Windows**, and builds both Docker images. From Phase 1 it also fails if `just types` or the README results block would change (generated files must be committed up to date).
+CI (`.github/workflows/ci.yml`) runs `just check-*` and `just test-*` per stack, Rust on Ubuntu **and Windows**, and builds both Docker images; `security.yml` and `codeql.yml` scan dependencies, secrets and code. What each job enforces, how it maps to the git hooks, and the branch protection: [.github/README.md](../.github/README.md). CI also fails if `just types` or the TanStack Router route tree would change, and from Phase 2 if the README results block would (generated files must be committed up to date).
 
 ### Desktop app notes
 
@@ -91,7 +98,7 @@ Commit `uv.lock`, `pnpm-lock.yaml` and `Cargo.lock` together with the change.
 
 ## Code conventions
 
-- **Layering rule**: `domain` imports nothing from `adapters`, `http` or `realtime`. `ports` are `typing.Protocol`s. Wiring happens only in `container.py`. Enforced by the `import-linter` contracts in the root `pyproject.toml` (`just check`).
+- **Layering rule**: `domain` imports nothing from `adapters`, `http` or `realtime`. `ports` are `typing.Protocol`s. `services` hold the use cases the HTTP layer calls and depend on ports only. Wiring happens only in `container.py`. Enforced by the `import-linter` contracts in the root `pyproject.toml` (`just check`).
 - **No `Any` at boundaries**: external payloads are parsed into Pydantic models immediately; internal code receives typed objects.
 - **Value objects are immutable**: `@dataclass(frozen=True, slots=True)` or Pydantic models with `frozen=True`.
 - **Async everywhere in `api`**: no blocking calls in the event loop. CPU-bound work (VAD on large buffers, resampling) goes through `anyio.to_thread` or the `pron` service.
@@ -119,24 +126,30 @@ def phoneme_posteriors(audio: Float[Tensor, "samples"]) -> Float[Tensor, "frames
 | Layer | What | How |
 |---|---|---|
 | Unit | Scoring, alignment, corrections parsing, progress aggregation, audio framing | Pure functions; hypothesis for alignment invariants |
-| Contract | Each adapter against a recorded/fake server | HTTP mocks (respx or the httpx2 equivalent, decided in Phase 1) and fixture responses; one test per port method |
+| Contract | Each adapter against a recorded/fake server | `httpx2.MockTransport` with canned provider responses (JSON and SSE streams), passed to the SDK clients; one test per port method plus every error mapping |
 | Realtime | Full WS session with fake STT/LLM/TTS adapters | Starlette `TestClient` WebSocket; asserts event order, barge-in cancellation, error paths |
 | Golden audio | `pron` on short WAV fixtures with known verdicts | Tolerance-based assertions; runs on CPU in CI |
 | Eval (not CI) | L2-ARCTIC + latency | `just eval`; results committed to `eval/results/` |
 | UI | Audio worklet framing, WS client, Markdown rendering is sanitised | Vitest + Testing Library |
 | Desktop | Permission handler logic, native audio framing | `cargo test`; manual smoke test of mic on Windows and Linux before each release |
 
-Coverage target: 85 % for `domain`, `teacher`, `vt_pron.scoring` and `vt_pron.alignment`. Do not chase coverage in adapters; contract tests matter more.
+### Coverage
+
+**Floor: 97 % of lines, branches and functions in every language** (Python, TypeScript, Rust), enforced by `just test` and CI. It is a floor, not a target: raise it as the suite grows and **never lower it to make a build pass**.
+
+- Coverage is a minimum, not the goal: adapters still need contract tests, and a line executed is not a line asserted.
+- Exclusions are few and justified next to their configuration: entrypoints (`src/main.tsx`, `main.rs`), code that needs a real window/webview (`src-tauri/src/shell.rs`; keep logic out of it, in tested modules), generated code and test helpers.
+- `if __name__ == "__main__":` and `if TYPE_CHECKING:` blocks are excluded in Python.
 
 ## Branches and commits (git flow)
 
 | Branch | Purpose | Branches from | Merges into |
 |---|---|---|---|
-| `master` | Released code only; every merge is tagged `vX.Y.Z` | — | — |
+| `master` | Released code only; every merge is released as `vX.Y.Z` by CI ([how](../.github/README.md#releasing)) | — | — |
 | `develop` | Integration branch: the next release | `master` | — |
 | `feat/<short-name>` | One feature | `develop` | `develop` (PR) |
 | `fix/<short-name>` | One bug fix | `develop` | `develop` (PR) |
-| `release/X.Y.Z` | Freeze, version bump, changelog | `develop` | `master` + back into `develop` |
+| `release/X.Y.Z` | Freeze, version bump (`just bump X.Y.Z`) | `develop` | `master` + back into `develop` |
 | `hotfix/<short-name>` | Urgent fix on released code | `master` | `master` + `develop` |
 
 - Never commit directly to `master` or `develop`: open a PR, and merge it only with CI green.

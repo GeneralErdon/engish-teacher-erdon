@@ -1,25 +1,51 @@
-# Weekly update PRs, grouped per ecosystem so they stay reviewable.
+# Weekly update PRs into `develop` (git flow), grouped per ecosystem so they stay reviewable.
+# Commit messages follow commitlint.config.mjs (type + `deps` scope).
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    directories: [/, /.github/actions/*]
+    target-branch: develop
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 } # let a release age a week before adopting it
+    commit-message: { prefix: "ci(deps)" }
     groups: { actions: { patterns: ["*"] } }
   - package-ecosystem: uv
     directory: /
+    target-branch: develop
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 } # let a release age a week before adopting it
+    commit-message: { prefix: "chore(deps)" }
     groups: { python: { patterns: ["*"] } }
   - package-ecosystem: npm
     directory: /
+    target-branch: develop
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 } # let a release age a week before adopting it
+    commit-message: { prefix: "chore(deps)" }
     groups: { js: { patterns: ["*"] } }
+    ignore:
+      # typescript-eslint supports typescript <6.1 (docs/development.md#toolchain).
+      - dependency-name: typescript
+        versions: [">=6.1.0"]
+      # Must match the Node 24 runtime (.nvmrc).
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
   - package-ecosystem: cargo
     directory: /apps/desktop/src-tauri
+    target-branch: develop
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 } # let a release age a week before adopting it
+    commit-message: { prefix: "chore(deps)" }
     groups: { rust: { patterns: ["*"] } }
   - package-ecosystem: docker
     directories: [/services/api, /services/pron]
+    target-branch: develop
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 } # let a release age a week before adopting it
+    commit-message: { prefix: "chore(deps)" }
   - package-ecosystem: docker-compose
     directory: /
+    target-branch: develop
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 } # let a release age a week before adopting it
+    commit-message: { prefix: "chore(deps)" }
