@@ -1,10 +1,13 @@
 # Static analysis of our own code (free for public repositories). Results: Security tab.
+# On release pull requests, pushes to master and weekly: the Rust analysis alone takes about
+# half an hour, too long to wait for on every pull request into develop.
 name: CodeQL
 
 on:
   push:
-    branches: [master, develop]
+    branches: [master]
   pull_request:
+    branches: [master]
   schedule:
     - cron: "41 6 * * 1" # Mondays: new queries over unchanged code
   workflow_dispatch:
