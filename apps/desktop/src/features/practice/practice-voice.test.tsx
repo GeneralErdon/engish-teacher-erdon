@@ -336,4 +336,33 @@ describe('Speech settings', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent(/whisper.cpp \(GPU\) stopped/)
   })
+
+  it('keeps the engine warning beside a later warning and after the next turn', async () => {
+    const { socket } = await openPractice()
+    socket.emit(
+      {
+        type: 'error',
+        v: 1,
+        code: 'speech_engine_unavailable',
+        message: 'whisper.cpp (GPU) is not running: Speaches transcribes this conversation.',
+        retryable: true,
+      },
+      {
+        type: 'error',
+        v: 1,
+        code: 'speech_model_missing',
+        message: 'The speech model you chose is gone. Pick another in Settings → Voice.',
+        retryable: true,
+      },
+    )
+
+    const alerts = screen.getAllByRole('alert')
+    expect(alerts).toHaveLength(2)
+    expect(alerts[0]).toHaveTextContent(/whisper.cpp \(GPU\) is not running/)
+    expect(alerts[1]).toHaveTextContent(/speech model you chose is gone/)
+
+    socket.emit(...spokenTurn())
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/whisper.cpp \(GPU\) is not running/)
+  })
 })

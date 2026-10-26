@@ -5,11 +5,13 @@ import { cn } from '@/lib/utils'
 
 type Engine = Schemas['SttEngine']
 
+/** Hints mark commands with backticks; they show as code. */
 const OPTIONS: readonly { engine: Engine; label: string; hint: (running: boolean) => string }[] = [
   {
     engine: 'openai',
     label: 'Speaches · CPU',
-    hint: () => 'Uses an NVIDIA GPU with the `nvidia` profile',
+    hint: (running) =>
+      running ? 'Uses an NVIDIA GPU with the `nvidia` profile' : 'Start it with `just voice`',
   },
   {
     engine: 'whispercpp',
@@ -20,6 +22,20 @@ const OPTIONS: readonly { engine: Engine; label: string; hint: (running: boolean
         : 'Start it with `just voice gpu` (Linux, AMD or Intel GPU)',
   },
 ]
+
+/** `text` with each backticked part as code. */
+function WithCode({ text }: { text: string }) {
+  // Splitting on a capture group keeps the code parts, at the odd indexes.
+  return text.split(/`([^`]+)`/).map((part, index) =>
+    index % 2 === 1 ? (
+      <code key={index} className="bg-muted text-foreground rounded px-1 font-mono">
+        {part}
+      </code>
+    ) : (
+      part
+    ),
+  )
+}
 
 /** Which engine transcribes: a two-segment control. A stopped engine cannot be picked. */
 export function EngineChoice({
@@ -63,7 +79,7 @@ export function EngineChoice({
               {label}
             </span>
             <span id={`${titleId}-hint`} className="text-muted-foreground text-xs">
-              {hint(running)}
+              <WithCode text={hint(running)} />
             </span>
           </RadioGroupPrimitive.Item>
         )

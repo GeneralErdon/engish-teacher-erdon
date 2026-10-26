@@ -91,6 +91,9 @@ export function CallView({
           {(call.error ?? conversation.error) && (
             <p className="text-destructive text-sm">{call.error ?? conversation.error}</p>
           )}
+          {conversation.notice && (
+            <p className="text-muted-foreground text-sm">{conversation.notice}</p>
+          )}
         </div>
       </div>
 

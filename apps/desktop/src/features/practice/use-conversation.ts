@@ -34,6 +34,11 @@ export interface ConversationState {
   /** Spoken audio was sent and its transcript has not come back yet. */
   transcribing: boolean
   error?: string | undefined
+  /**
+   * The chosen speech engine cannot transcribe, so Speaches does (`speech_engine_unavailable`).
+   * Unlike `error`, it stays for the rest of the conversation: later turns and errors keep it.
+   */
+  notice?: string | undefined
 }
 
 type Action =
@@ -65,7 +70,7 @@ export function reducer(state: ConversationState, action: Action): ConversationS
     case 'transcribing':
       return { ...state, transcribing: true }
     case 'session.ready':
-      return { ...state, session: action, error: undefined }
+      return { ...state, session: action, error: undefined, notice: undefined }
     case 'transcript.final':
       return {
         ...state,
@@ -108,6 +113,8 @@ export function reducer(state: ConversationState, action: Action): ConversationS
     case 'turn.metrics':
       return updateTurn(state, action.turn_id, (turn) => ({ ...turn, metrics: action }))
     case 'error': {
+      // Transcription goes on with Speaches: a notice, not an error, and not a speech error.
+      if (action.code === 'speech_engine_unavailable') return { ...state, notice: action.message }
       // A failed reply belongs to the turn in progress; anything else is about the session.
       const last = state.turns.at(-1)
       if (action.code === 'llm_failed' && last && !last.replyDone) {

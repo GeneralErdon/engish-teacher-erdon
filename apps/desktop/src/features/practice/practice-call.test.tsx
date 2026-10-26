@@ -161,6 +161,21 @@ describe('Call mode', () => {
     expect(dialog.getByText('Go ahead, I’m listening')).toBeInTheDocument()
   })
 
+  it('keeps the engine warning in view while the call goes on', async () => {
+    const { dialog, detector, socket } = await startCall()
+    socket.emit({
+      type: 'error',
+      v: 1,
+      code: 'speech_engine_unavailable',
+      message: 'whisper.cpp (GPU) stopped answering: Speaches transcribes the rest.',
+      retryable: true,
+    })
+    detector.say()
+    tutorSpeaks(socket)
+
+    expect(dialog.getByText(/whisper.cpp \(GPU\) stopped answering/)).toBeInTheDocument()
+  })
+
   it('mutes and unmutes the microphone', async () => {
     const { dialog, detector, user } = await startCall()
 
@@ -383,5 +398,41 @@ describe('transcription state', () => {
     const tooLong = { ...error('no_speech'), code: 'audio_too_long' } as unknown as ServerEvent
 
     expect(reducer(start, tooLong).transcribing).toBe(false)
+  })
+})
+
+describe('engine notice', () => {
+  const start = { status: 'open' as const, turns: [], transcribing: false }
+  const event = (code: Extract<ServerEvent, { type: 'error' }>['code'], message: string) =>
+    ({ type: 'error', v: 1, code, message, retryable: true }) as const
+  const turn = {
+    type: 'transcript.final',
+    v: 1,
+    turn_id: 't1',
+    text: 'Hello',
+    source: 'voice',
+    stt_ms: 400,
+    cut: false,
+  } as const
+
+  it('stays through later turns and other warnings, apart from the error', () => {
+    const warned = reducer(start, event('speech_engine_unavailable', 'GPU stopped'))
+    expect(warned.notice).toBe('GPU stopped')
+    expect(warned.error).toBeUndefined()
+
+    const missing = reducer(warned, event('speech_model_missing', 'Model missing'))
+    expect(missing).toMatchObject({ notice: 'GPU stopped', error: 'Model missing' })
+
+    const spoken = reducer(missing, turn)
+    expect(spoken).toMatchObject({ notice: 'GPU stopped', error: undefined })
+
+    expect(reducer(spoken, event('speech_engine_unavailable', 'Again')).notice).toBe('Again')
+  })
+
+  it('belongs to one conversation: a new session starts without it', () => {
+    const warned = reducer(start, event('speech_engine_unavailable', 'GPU stopped'))
+
+    const ready = { type: 'session.ready', v: 1, level: 'B1', provider: 'p', model: 'm' } as const
+    expect(reducer(warned, ready).notice).toBeUndefined()
   })
 })
