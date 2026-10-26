@@ -17,7 +17,8 @@ A repository listed in `single_file_repos` (whisper.cpp's GGML files) holds mode
 single files, `org/name/file`, each fetched and removed alone. The marker then holds the model id
 being downloaded (an empty one, from an older api, means the whole repository), and every
 removal there spares the files that are complete: only orphan `*.incomplete` blobs, dangling
-snapshot links and the marker go, and the folder goes once no snapshot file is left.
+snapshot links and the marker go, and the folder goes once no snapshot file is left and no
+download of ours writes into it.
 """
 
 import asyncio
@@ -57,15 +58,20 @@ _WORKER_ENV = {"HF_HUB_DISABLE_XET": "1", "HF_HUB_DISABLE_PROGRESS_BARS": "1"}
 
 async def hub_total_size(model_id: str) -> int:
     """The bytes of every file in the model's main revision, or of its one file, from the
-    Hugging Face API."""
+    Hugging Face API.
+
+    Raises `SpeechSettingsError` (502) for a file the repository does not list: the worker
+    would fetch nothing and succeed, and the model would count as downloaded without its file.
+    """
     repo_id, only = split_model_id(model_id)
     info = await anyio.to_thread.run_sync(
         lambda: HfApi().model_info(repo_id, files_metadata=True, timeout=_HUB_TIMEOUT_S),
         abandon_on_cancel=True,
     )
-    return sum(
-        file.size or 0 for file in info.siblings or [] if only is None or file.rfilename == only
-    )
+    files = [file for file in info.siblings or [] if only is None or file.rfilename == only]
+    if only is not None and not files:  # absent, not merely empty: the listing says
+        raise SpeechSettingsError(502, f"Hugging Face has no file {only} in {repo_id}.")
+    return sum(file.size or 0 for file in files)
 
 
 class HfModelFiles:
@@ -201,6 +207,8 @@ class HfModelFiles:
     async def _size(self, model_id: str) -> int:
         try:
             return await self._total_size(model_id)
+        except SpeechSettingsError:  # it says what is wrong already
+            raise
         except Exception as error:
             raise SpeechSettingsError(
                 502, f"Could not get the size of {model_id} from Hugging Face: {error}"
@@ -370,6 +378,10 @@ def _remove_partial_files(repo: Path) -> None:
 
 
 def _remove_if_empty(repo: Path) -> None:
+    """Remove the folder once no snapshot file is left, unless our marker says a download is
+    writing into it: the file it fetches has no link yet."""
+    if (repo / DOWNLOADING_MARKER).exists():
+        return
     if not any(link.is_file() for link in _snapshot_links(repo)):
         shutil.rmtree(repo, ignore_errors=True)
 

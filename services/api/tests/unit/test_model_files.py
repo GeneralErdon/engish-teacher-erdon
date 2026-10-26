@@ -438,6 +438,41 @@ async def test_total_size_of_one_file_is_that_file(monkeypatch: pytest.MonkeyPat
     assert await model_files.hub_total_size(GGML) == 147964211 + 264477561
 
 
+@pytest.mark.parametrize("size", [0, None])
+async def test_total_size_of_a_listed_empty_file_is_zero(
+    monkeypatch: pytest.MonkeyPatch, size: int | None
+) -> None:
+    siblings = [SimpleNamespace(rfilename="ggml-base.en.bin", size=size)]
+    monkeypatch.setattr(HfApi, "model_info", lambda *_a, **_k: SimpleNamespace(siblings=siblings))
+
+    assert await model_files.hub_total_size(BASE) == 0
+
+
+async def test_a_file_hugging_face_does_not_have_is_not_downloaded(
+    tmp_path: Path, cache: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worker would fetch nothing and succeed, and the model would be activated without
+    its file: refuse before it starts."""
+    siblings = [SimpleNamespace(rfilename="ggml-base.en.bin", size=147964211)]
+    monkeypatch.setattr(HfApi, "model_info", lambda *_a, **_k: SimpleNamespace(siblings=siblings))
+    files = HfModelFiles(
+        cache,
+        single_file_repos={GGML},
+        total_size=model_files.hub_total_size,
+        worker=[str(tmp_path / "no-such-worker")],  # started, it would raise FileNotFoundError
+    )
+
+    with pytest.raises(SpeechSettingsError) as caught:
+        await files.download(MEDIUM)
+
+    assert caught.value.status == 502
+    assert caught.value.message == (
+        "Hugging Face has no file ggml-medium.en-q5_0.bin in ggerganov/whisper.cpp."
+    )
+    assert not (cache / GGML_REPO).exists()
+    assert files.progress() is None
+
+
 async def test_single_file_progress_counts_only_the_new_file(tmp_path: Path, cache: Path) -> None:
     # The repository holds a complete 1 000-byte sibling; the worker writes 300 bytes into a
     # new `.incomplete` blob (the fake worker writes `f00d.1a2b3c4d.incomplete`).
@@ -534,6 +569,22 @@ async def test_delete_one_file_keeps_its_siblings(cache: Path) -> None:
     await files.delete(SMALL)
 
     assert not repo.exists()
+
+
+async def test_deleting_the_last_file_spares_a_download_into_the_folder(cache: Path) -> None:
+    """Medium is downloading into the folder, and has no link yet: removing base, the only
+    complete file, must not remove the folder under it."""
+    repo = ggml_repo(cache, files=[("r2", "ggml-base.en.bin", "aaa")])
+    (repo / "blobs" / "ccc.1a2b3c4d.incomplete").write_bytes(b"x")
+    (repo / DOWNLOADING_MARKER).write_text(MEDIUM)
+    files: ModelFiles = ggml_files(cache)
+
+    await files.delete(BASE)
+
+    assert not (repo / "snapshots" / "r2" / "ggml-base.en.bin").is_symlink()
+    assert not (repo / "blobs" / "aaa").exists()
+    assert (repo / DOWNLOADING_MARKER).read_text() == MEDIUM
+    assert (repo / "blobs" / "ccc.1a2b3c4d.incomplete").exists()
 
 
 async def test_a_delete_of_a_file_that_is_not_there_is_fine(cache: Path) -> None:
