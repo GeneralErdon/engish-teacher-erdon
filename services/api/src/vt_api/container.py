@@ -23,8 +23,6 @@ from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
 from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
 from vt_api.config import Settings
 from vt_api.domain.llm import environment_config
-from vt_api.domain.speech import SessionSpeech, VoiceChoice, entry_for
-from vt_api.ports.speech import SpeechToText, TextToSpeech
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
 from vt_api.services.speech import SpeechService
@@ -42,10 +40,6 @@ default for status calls; transcription sets its own."""
 class Container:
     llm: LlmService
     learner: LearnerService
-    stt: SpeechToText
-    tts: TextToSpeech
-    session_speech: SessionSpeech
-    """What a conversation uses, from the settings; the saved choice replaces it later."""
     speech: SpeechService
 
 
@@ -89,18 +83,6 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
 
         stt = OpenAISpeechToText(speech_client(settings.stt_base_url, TTS_TIMEOUT_S))
         tts = OpenAITextToSpeech(speech_client(settings.tts_base_url, TTS_TIMEOUT_S))
-        session_speech = SessionSpeech(
-            stt_model=settings.stt_model,
-            voice=VoiceChoice(
-                settings.tts_model,
-                settings.tts_voice,
-                settings.tts_speed,
-                sample_rate_hz=(
-                    entry.sample_rate_hz if (entry := entry_for(settings.tts_model)) else None
-                ),
-            ),
-            max_turn_s=settings.max_turn_s,
-        )
         speaches_http = httpx2.AsyncClient(timeout=TTS_TIMEOUT_S)
         stack.push_async_callback(speaches_http.aclose)
         files = (
@@ -144,8 +126,5 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
                 ),
                 native_language=settings.learner_l1,
             ),
-            stt=stt,
-            tts=tts,
-            session_speech=session_speech,
             speech=speech,
         )

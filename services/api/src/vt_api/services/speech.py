@@ -99,6 +99,11 @@ class SpeechService:
         self._last_error: str | None = None
         self._measured: dict[str, _Measured] = {}
 
+    @property
+    def default_max_turn_s(self) -> int:
+        """The longest turn before a conversation has started and read its settings."""
+        return self._defaults.max_turn_s
+
     async def view(self) -> SpeechSettingsView:
         saved = await self._repository.load()
         settings = saved or self._defaults

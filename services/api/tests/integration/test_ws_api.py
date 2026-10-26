@@ -22,7 +22,6 @@ from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.domain.llm import environment_config
-from vt_api.domain.speech import SessionSpeech, VoiceChoice
 from vt_api.main import create_app
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
@@ -119,9 +118,6 @@ def client(database: Database, learner_service: LearnerService) -> TestClient:
     container = Container(
         llm=llm,
         learner=learner_service,
-        stt=stt,
-        tts=tts,
-        session_speech=SessionSpeech("whisper", VoiceChoice("kokoro", "af_heart", 1.0), 120),
         speech=speech,
     )
     return TestClient(create_app(Settings(_env_file=None), container=container))
@@ -182,6 +178,7 @@ def test_a_spoken_turn(client: TestClient) -> None:
         "text": "I have went to the beach",
         "source": "voice",
         "stt_ms": 0,
+        "cut": False,
     }
 
 

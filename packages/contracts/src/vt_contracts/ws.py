@@ -23,7 +23,7 @@ type ErrorCode = Literal[
     "tts_failed",
     "no_speech",
     "audio_too_short",
-    "audio_too_long",
+    "speech_model_missing",
 ]
 
 
@@ -111,6 +111,8 @@ class TranscriptFinal(_Event):
     source: Literal["text", "voice"]
     stt_ms: int | None = None
     """Speech-to-text time, from the end of speech to this event (voice turns only)."""
+    cut: bool = False
+    """The turn went over the longest-turn setting and was transcribed up to it."""
 
 
 class AssistantTextDelta(_Event):

@@ -11,14 +11,11 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from vt_api.adapters.chat_factory import SdkChatModelFactory
-from vt_api.adapters.openai_stt import OpenAISpeechToText
-from vt_api.adapters.openai_tts import OpenAITextToSpeech
 from vt_api.adapters.sql.database import Database
 from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.domain.llm import environment_config
-from vt_api.domain.speech import SessionSpeech, VoiceChoice
 from vt_api.main import create_app
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
@@ -79,9 +76,6 @@ def container(
             environment=environment,
         ),
         learner=learner_service,
-        stt=create_autospec(OpenAISpeechToText, instance=True),
-        tts=create_autospec(OpenAITextToSpeech, instance=True),
-        session_speech=SessionSpeech("whisper", VoiceChoice("kokoro", "af_heart", 1.0), 120),
         speech=create_autospec(SpeechService, instance=True),
     )
 

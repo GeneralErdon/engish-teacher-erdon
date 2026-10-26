@@ -11,7 +11,6 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import ValidationError
 
-from vt_api.ports.speech import SpeechToText, TextToSpeech
 from vt_api.realtime.session import ConversationSession, Send
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
@@ -51,16 +50,12 @@ async def session_socket(websocket: WebSocket) -> None:
 
     llm: LlmService = state.container.llm
     learner: LearnerService = state.container.learner
-    stt: SpeechToText = state.container.stt
-    tts: TextToSpeech = state.container.tts
     session = ConversationSession(
         send=send,
         send_audio=send_audio,
         llm=llm,
         learner=learner,
-        stt=stt,
-        tts=tts,
-        speech=state.container.session_speech,
+        speech=state.container.speech,
     )
     try:
         # The client may go away while a reply is being sent: that ends the session too.

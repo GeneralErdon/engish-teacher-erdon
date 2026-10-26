@@ -851,3 +851,9 @@ async def test_a_configured_default_outside_the_list_is_shown(
     with pytest.raises(SpeechSettingsError) as refused:
         await service.uninstall(row.key)
     assert refused.value.status == 409
+
+
+async def test_the_default_longest_turn_is_known_before_any_session(
+    speech_defaults: SpeechSettings, service: SpeechService
+) -> None:
+    assert service.default_max_turn_s == speech_defaults.max_turn_s

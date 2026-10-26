@@ -17,7 +17,6 @@ from vt_api.adapters.sql.database import Database
 from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
 from vt_api.config import Settings
 from vt_api.container import Container
-from vt_api.domain.speech import SessionSpeech, VoiceChoice
 from vt_api.main import create_app
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
@@ -107,9 +106,6 @@ async def client(
     container = Container(
         llm=create_autospec(LlmService, instance=True),
         learner=learner_service,
-        stt=stt,
-        tts=tts,
-        session_speech=SessionSpeech("whisper", VoiceChoice("kokoro", "af_heart", 1.0), 120),
         speech=speech,
     )
     app = create_app(Settings(_env_file=None), container=container)
