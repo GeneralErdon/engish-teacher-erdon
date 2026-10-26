@@ -145,7 +145,31 @@ async def test_is_speaches_true_when_registry_answers(fake: Fake, server: Speach
     fake.handler = lambda _r: httpx2.Response(200, json=REGISTRY)
 
     assert await server.is_speaches() is True
-    assert str(fake.requests[0].url) == "http://localhost:8000/v1/registry"
+    assert str(fake.requests[0].url) == "http://localhost:8000/v1/registry?task=text-to-speech"
+
+
+async def test_is_speaches_asks_once_and_shares_the_voices_registry(
+    fake: Fake, server: SpeachesServer
+) -> None:
+    """The service asks on every models() call, which the UI polls each second."""
+    fake.handler = lambda _r: httpx2.Response(200, json=REGISTRY)
+
+    assert await server.is_speaches() is True
+    assert await server.is_speaches() is True
+    assert len(await server.voices(KOKORO)) == 2
+
+    assert len(fake.requests) == 1
+
+
+async def test_is_speaches_asks_again_after_a_failure(fake: Fake, server: SpeachesServer) -> None:
+    fake.handler = lambda _r: httpx2.Response(503)
+    assert await server.is_speaches() is False
+
+    fake.handler = lambda _r: httpx2.Response(200, json=REGISTRY)
+
+    assert await server.is_speaches() is True
+    assert await server.is_speaches() is True
+    assert len(fake.requests) == 2
 
 
 async def test_is_speaches_false_for_other_servers(fake: Fake, server: SpeachesServer) -> None:

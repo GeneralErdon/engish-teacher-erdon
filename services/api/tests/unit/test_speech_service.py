@@ -9,10 +9,12 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any
 from unittest.mock import NonCallableMagicMock, create_autospec
 
+import httpx2
 import pytest
 
 from vt_api.adapters.openai_stt import OpenAISpeechToText
 from vt_api.adapters.openai_tts import OpenAITextToSpeech
+from vt_api.adapters.speaches import SpeachesServer
 from vt_api.adapters.sql.database import Database
 from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
 from vt_api.domain.llm import ProviderError
@@ -747,6 +749,43 @@ async def test_models_survive_a_server_that_does_not_answer(
     with pytest.raises(SpeechSettingsError) as refused:
         await service.download("whisper-small-en", activate=True)
     assert refused.value.status == 409
+
+
+async def test_models_ask_the_speaches_registry_once_it_answers(
+    database: Database,
+    speech_defaults: SpeechSettings,
+    files: FakeFiles,
+    stt: NonCallableMagicMock,
+    tts: NonCallableMagicMock,
+) -> None:
+    """The UI polls the models every second while a download runs; a registry that fails
+    once is asked again, so the kinds become manageable when it answers."""
+    registry: list[httpx2.Request] = []
+    answers = iter([httpx2.Response(503), httpx2.Response(503)])
+
+    def speaches(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/v1/models":
+            return httpx2.Response(200, json={"data": [{"id": WHISPER}, {"id": KOKORO}]})
+        registry.append(request)
+        return next(answers, httpx2.Response(200, json={"data": []}))
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(speaches)) as http:
+        service = SpeechService(
+            repository=SqlSpeechSettingsRepository(database),
+            stt=stt,
+            tts=tts,
+            recognition_server=SpeachesServer(http, "http://localhost:8000/v1"),
+            voice_server=SpeachesServer(http, "http://localhost:8000/v1"),
+            files=files,
+            defaults=speech_defaults,
+        )
+        manageable = []
+        for _ in range(3):
+            models = await service.models()
+            manageable.append((models.recognition_manageable, models.voice_manageable))
+
+    assert manageable == [(False, False), (True, True), (True, True)]
+    assert len(registry) == 4  # one failed and one good answer per kind's server
 
 
 async def test_save_reports_a_server_that_does_not_answer(

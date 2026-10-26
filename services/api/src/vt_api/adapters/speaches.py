@@ -20,8 +20,10 @@ class SpeachesServer:
         self._registry: list[Any] | None = None
 
     async def is_speaches(self) -> bool:
+        """Asks the registry `voices()` reads, so one answer serves both and is kept; a failure
+        is asked again on the next call."""
         try:
-            await self._get_data(f"{self._root}/v1/registry")
+            await self._tts_registry()
         except ProviderError:
             return False
         return True
@@ -46,6 +48,7 @@ class SpeachesServer:
             _raise_for_status(response)
 
     async def _tts_registry(self) -> list[Any]:
+        """Speaches' text-to-speech models and their voices, fetched once it answers."""
         if self._registry is None:
             self._registry = await self._get_data(
                 f"{self._root}/v1/registry", {"task": "text-to-speech"}
