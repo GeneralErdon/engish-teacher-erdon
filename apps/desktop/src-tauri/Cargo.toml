@@ -3,6 +3,7 @@ name = "voice-tutor-desktop"
 version = "0.1.0"
 description = "voice-tutor desktop shell (Tauri 2)"
 authors = ["GeneralErdon"]
+license = "MIT"
 edition = "2024"
 rust-version = "1.99"
 publish = false

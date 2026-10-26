@@ -2,6 +2,11 @@
 
 Every change reaches `develop` (and later `master`) through a pull request whose checks prove it is tested. The same gates run **locally as git hooks** (fast feedback) and **in CI** (where `git commit --no-verify` or the web editor cannot skip them).
 
+Two levels, so a pull request into `develop` is not held up by checks that only matter before a release:
+
+- **Pull requests into `develop`** (features, fixes, Dependabot, the back-merge): commit messages, hygiene, Python, UI, Desktop on Ubuntu, compose config and Dependency review. About three minutes.
+- **Release pull requests (into `master`)** and pushes to `master`: all of the above plus Desktop on Windows, the image builds, Trivy, Audit and CodeQL (its Rust analysis alone takes about half an hour). Trivy, Audit and CodeQL also run weekly, for new CVEs and queries over unchanged code. Pushes to `develop` run the full `ci.yml` too, so a Windows or Docker break shows up right after the merge instead of at release time.
+
 ## Workflows
 
 | Workflow | Runs on | Job | What it enforces |
@@ -10,13 +15,13 @@ Every change reaches `develop` (and later `master`) through a pull request whose
 | | | **Hygiene** | the repository-wide pre-commit hooks (whitespace, YAML/TOML/JSON, large files, private keys, `uv.lock` up to date, ruff, zizmor on the workflows) |
 | | | **Python** | ruff, mypy `--strict`, import-linter contracts, pytest with **≥ 97 %** coverage |
 | | | **UI** | ESLint (type-aware), `tsc`, Prettier, Vitest with **≥ 97 %** coverage, production build; generated code up to date (`just types` and the route tree must not change) |
-| | | **Desktop** (Ubuntu + Windows) | `cargo fmt`, clippy pedantic `-D warnings`, `cargo test` under cargo-llvm-cov with **≥ 97 %** coverage |
-| | | **Docker** | `compose.yaml` valid for every profile; `api` and `pron` images build |
+| | | **Desktop** (Ubuntu; + Windows on release PRs and pushes) | `cargo fmt`, clippy pedantic `-D warnings`, `cargo test` under cargo-llvm-cov with **≥ 97 %** coverage |
+| | | **Docker** | `compose.yaml` valid for every profile; on release PRs and pushes, the `api` and `pron` images build |
+| | | **Dependency review** | blocks PRs that add a dependency with a known HIGH vulnerability (PRs only) |
 | | | **CI ok** | aggregate: fails if any job above failed or was cancelled. **The check branch protection requires** |
-| `security.yml` | every PR; push; weekly | **Trivy** | HIGH/CRITICAL fixable CVEs in `Cargo.lock`; secrets; Dockerfile misconfigurations. Policy in `trivy.yaml`; results in the Security tab |
+| `security.yml` | release PRs; push to `master`; weekly | **Trivy** | HIGH/CRITICAL fixable CVEs in `Cargo.lock`; secrets; Dockerfile misconfigurations. Policy in `trivy.yaml`; results in the Security tab |
 | | | **Audit** | `uv audit` (every Python package in `uv.lock`, OSV database, SARIF to the Security tab) and `pnpm audit` (high/critical). Trivy cannot parse uv's virtual-workspace lockfile nor pnpm 12's two-document lockfile, so each ecosystem uses its own auditor |
-| | | **Dependency review** | blocks PRs that add a dependency with a known HIGH vulnerability |
-| `codeql.yml` | every PR; push; weekly | **CodeQL** | `security-extended` queries for Python, TypeScript, Rust and the workflows themselves |
+| `codeql.yml` | release PRs; push to `master`; weekly | **CodeQL** | `security-extended` queries for Python, TypeScript, Rust and the workflows themselves |
 | `apps.yml` | called by `release.yml`; by hand (`gh workflow run apps.yml --ref <branch>`) | **Desktop** (Ubuntu + Windows) | builds the installers (`.deb`, `.rpm`, `.AppImage`; `.msi`, setup `.exe`). Not on every push: a full build takes about 25 minutes. By hand, they stay 30 days as the run's artifacts, to try a branch between releases |
 | | | **Android** | a signed arm64 `.apk` from `apps/desktop/src-tauri/gen/android` (the runner brings the Android SDK, NDK and Java 17). If the Android project is missing, generates it instead and uploads it as `android-project`, to commit |
 | `release.yml` | PR into `master`; push to `master` | **Version** | the version (`just bump X.Y.Z`) is the same in every package and not released yet. On a PR, that is all it runs |
@@ -44,8 +49,10 @@ Coverage reports are uploaded to [Codecov](https://about.codecov.io/) (flags `py
 | clippy | | | yes | Desktop |
 | tests | | | yes (no coverage) | Python, UI, Desktop (with coverage) |
 | coverage ≥ 97 % | | | | Python, UI, Desktop |
-| image builds, compose config | | | | Docker |
-| CVEs (`just security` locally), CodeQL | | | | Security, CodeQL |
+| compose config | | | | Docker |
+| image builds | | | | Docker (release PRs and pushes) |
+| CVEs added by the PR | | | | Dependency review |
+| CVEs (`just security` locally), CodeQL | | | | Security, CodeQL (release PRs, pushes to `master`, weekly) |
 
 Pre-push hooks only run for the languages you touched. `just check` + `just test` locally is the same set CI runs.
 
