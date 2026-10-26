@@ -11,8 +11,8 @@ until a request fails.
 
 A model file that exists but does not load makes the server process exit, which drops the
 connection, so a failed load always forgets the loaded model. Written against `httpx2` rather
-than the openai SDK: only the transport tells a refused connection (the server is not running)
-from a read timeout (it is slow).
+than the openai SDK: only the transport tells a refused or dropped connection (the server is
+not running, or has just died) from a read timeout (it is slow).
 """
 
 import asyncio
@@ -29,6 +29,9 @@ from vt_contracts.speech import ModelStatus
 CONNECT_TIMEOUT_S = 3.0
 HEALTH_TIMEOUT_S = 3.0
 LOAD_TIMEOUT_S = 120.0
+_UNREACHABLE = (httpx2.NetworkError, httpx2.ConnectTimeout, httpx2.RemoteProtocolError)
+"""Refused (the server is not running) or dropped mid-request (it crashed, exited after a model
+that did not load, or was stopped). `NetworkError` covers connect, read, write and close."""
 
 
 class WhisperCppSpeechToText:
@@ -81,7 +84,7 @@ class WhisperCppSpeechToText:
             response = await self._http.get(
                 f"{self._base_url}/health", timeout=_timeout(HEALTH_TIMEOUT_S)
             )
-        except httpx2.ConnectError, httpx2.ConnectTimeout:
+        except _UNREACHABLE:
             return status.model_copy(update={"detail": EngineUnreachable(self._base_url).message})
         except httpx2.TimeoutException:
             return status.model_copy(update={"detail": timed_out(self._base_url).message})
@@ -108,13 +111,13 @@ class WhisperCppSpeechToText:
         self._loaded = model
 
     async def _send(self, path: str, timeout_s: float, **content: Any) -> httpx2.Response:
-        """POSTs to the server; raises `ProviderError` (`EngineUnreachable` when it refuses the
-        connection) and forgets the loaded model on any failure."""
+        """POSTs to the server; raises `ProviderError` (`EngineUnreachable` when it refuses or
+        drops the connection) and forgets the loaded model on any failure."""
         try:
             response = await self._http.post(
                 f"{self._base_url}{path}", timeout=_timeout(timeout_s), **content
             )
-        except (httpx2.ConnectError, httpx2.ConnectTimeout) as error:
+        except _UNREACHABLE as error:  # before `TimeoutException`: `ConnectTimeout` is one
             self._loaded = None
             raise EngineUnreachable(self._base_url) from error
         except httpx2.TimeoutException as error:

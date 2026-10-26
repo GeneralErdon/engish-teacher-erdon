@@ -314,7 +314,8 @@ class SpeechSettingsError(Exception):
 
 
 class EngineUnreachable(ProviderError):  # noqa: N818 (a condition, named for what happened)
-    """The GPU speech server refused the connection: it is not running (or has just exited).
+    """The GPU speech server refused or dropped the connection: it is not running, or has just
+    died (a crash, a model that did not load, a stop).
 
     Unlike a timeout or an error answer, it tells a conversation to fall back to the CPU engine.
     """

@@ -77,10 +77,8 @@ async def test_transcribe_posts_the_wav_and_strips_the_text(
     body = request.content
     assert b'name="file"; filename="speech.wav"' in body
     assert b"RIFFdata" in body
-    assert b'name="response_format"' in body
-    assert b'name="language"' in body
-    assert b"json" in body
-    assert b"en" in body
+    assert b'name="response_format"\r\n\r\njson\r\n' in body
+    assert b'name="language"\r\n\r\nen\r\n' in body
 
 
 async def test_transcribe_loads_a_different_model_first(
@@ -153,21 +151,28 @@ async def test_failed_load_forgets_the_loaded_model(
     await stt.transcribe(b"w", MODEL_A, 30)  # forgotten: loaded again
     assert fake.paths() == ["/v1/load"] * 3 + ["/v1/audio/transcriptions"]
 
+    # The file did not load: the server exited and dropped the connection.
     fake.handler = _raising(httpx2.RemoteProtocolError("dropped", request=_request()))
-    with pytest.raises(ProviderError) as dropped:
+    with pytest.raises(EngineUnreachable):
         await stt.load(MODEL_B)
-    assert not isinstance(dropped.value, EngineUnreachable)
 
     fake.handler = _ok
     await stt.transcribe(b"w", MODEL_A, 30)  # forgotten: loaded again
     assert fake.paths()[4:] == ["/v1/load", "/v1/load", "/v1/audio/transcriptions"]
 
 
-@pytest.mark.parametrize("error_type", [httpx2.ConnectError, httpx2.ConnectTimeout])
-async def test_connection_refused_is_engine_unreachable(
-    fake: Fake,
-    stt: WhisperCppSpeechToText,
-    error_type: type[httpx2.ConnectError] | type[httpx2.ConnectTimeout],
+@pytest.mark.parametrize(
+    "error_type",
+    [
+        httpx2.ConnectError,  # refused: the server is not running
+        httpx2.ConnectTimeout,
+        httpx2.RemoteProtocolError,  # dropped mid-request: it crashed or stopped
+        httpx2.ReadError,
+        httpx2.WriteError,
+    ],
+)
+async def test_connection_refused_or_dropped_is_engine_unreachable(
+    fake: Fake, stt: WhisperCppSpeechToText, error_type: type[httpx2.TransportError]
 ) -> None:
     fake.handler = _raising(error_type("refused", request=_request()))
 
@@ -212,10 +217,12 @@ async def test_read_timeout_and_http_errors_are_not_unreachable(
     assert not isinstance(failed.value, EngineUnreachable)
     assert failed.value.reason == "unavailable"
 
-    fake.handler = _raising(httpx2.RemoteProtocolError("gone", request=_request()))
-    with pytest.raises(ProviderError) as gone:
+    # A request this side could not send: the server is not the problem.
+    fake.handler = _raising(httpx2.LocalProtocolError("ours", request=_request()))
+    with pytest.raises(ProviderError) as ours:
         await stt.transcribe(b"w", MODEL_A, 30)
-    assert not isinstance(gone.value, EngineUnreachable)
+    assert not isinstance(ours.value, EngineUnreachable)
+    assert ours.value.reason == "connection"
 
 
 async def test_bad_answer_is_a_provider_error(fake: Fake, stt: WhisperCppSpeechToText) -> None:
@@ -275,6 +282,10 @@ async def test_status_explains_other_failures(fake: Fake, stt: WhisperCppSpeechT
     fake.handler = _raising(httpx2.RemoteProtocolError("gone", request=_request()))
     gone = await stt.status(MODEL_A)
     assert (gone.reachable, gone.detail) == (False, f"Could not connect to {BASE}.")
+
+    fake.handler = _raising(httpx2.LocalProtocolError("ours", request=_request()))
+    ours = await stt.status(MODEL_A)
+    assert (ours.reachable, ours.detail) == (False, f"Could not connect to {BASE}.")
 
 
 async def test_plain_text_error_is_reported(fake: Fake, stt: WhisperCppSpeechToText) -> None:
