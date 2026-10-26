@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator
 from typing import Protocol
 
-from vt_contracts.speech import ModelStatus, SpeechSettings
+from vt_contracts.speech import ModelStatus, SpeechSettings, Voice
 
 
 class SpeechToText(Protocol):
@@ -33,3 +33,23 @@ class SpeechSettingsRepository(Protocol):
         ...
 
     async def save(self, settings: SpeechSettings) -> None: ...
+
+
+class SpeechModelServer(Protocol):
+    """The server that holds the speech models (Speaches)."""
+
+    async def is_speaches(self) -> bool:
+        """Whether the server is Speaches, which can list and unload models; never raises."""
+        ...
+
+    async def installed(self) -> set[str]:
+        """The ids of the models downloaded on the server. Raises `ProviderError`."""
+        ...
+
+    async def voices(self, model_id: str) -> list[Voice]:
+        """The English voices of `model_id`; empty for an unknown model. Raises `ProviderError`."""
+        ...
+
+    async def unload(self, model_id: str) -> None:
+        """Free `model_id` from memory; fine if it was not loaded. Raises `ProviderError`."""
+        ...
