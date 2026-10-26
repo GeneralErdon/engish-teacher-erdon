@@ -41,7 +41,7 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 - [ ] `nvidia` profile, HTTPS profile (Caddy), Tailscale docs
 - [x] Multi-arch images on GHCR; desktop installers built in CI; release workflow (v0.1.0, 2026-10-23)
 - [ ] Demo video (2 min) and write-up
-- [ ] Choose licence (MIT planned)
+- [x] Licence: MIT (2026-10-26)
 
 ## Phase 4: One-click desktop install, no Docker (≈ 20–30 h)
 Goal: download the installer, open it, talk. Docker Compose stays as the server and home-lab install; both run the same code ([architecture.md#distribution](architecture.md#distribution)).

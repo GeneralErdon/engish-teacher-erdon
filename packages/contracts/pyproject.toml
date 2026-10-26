@@ -3,6 +3,7 @@ name = "vt-contracts"
 version = "0.1.0"
 description = "Typed messages shared by voice-tutor services and the UI (WebSocket protocol, pron API, audio formats)."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.14,<3.15"
 dependencies = ["pydantic>=2.14.1"]
 

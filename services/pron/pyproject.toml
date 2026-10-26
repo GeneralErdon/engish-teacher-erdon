@@ -3,6 +3,7 @@ name = "vt-pron"
 version = "0.1.0"
 description = "voice-tutor pronunciation scoring: G2P, wav2vec2 phoneme recognition, alignment, per-phoneme verdicts."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.14,<3.15"
 # torch, jaxtyping and beartype arrive in Phase 2 (recognizer); the bootstrap stays light.
 dependencies = [
