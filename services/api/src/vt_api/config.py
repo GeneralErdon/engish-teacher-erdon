@@ -65,8 +65,8 @@ class Settings(BaseSettings):
     tts_speed: float = Field(default=0.95, ge=0.7, le=1.3)
     # Longest learner turn kept, in seconds (the rest is cut).
     max_turn_s: int = Field(default=120, ge=30, le=300)
-    # Where Speaches keeps its models, mounted read-only to tell which are installed. Unset:
-    # the Speaches API is the only source.
+    # The Hugging Face cache folder shared with Speaches: the api downloads and removes speech
+    # models there, and creates it if missing. Unset: the model lists are read-only.
     speech_models_dir: Path | None = None
 
     # Pronunciation scoring
