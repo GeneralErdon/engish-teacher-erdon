@@ -6,13 +6,20 @@ is the bytes on disk. Xet is off in the child: with Xet, `huggingface_hub` 2.2 k
 a store shared by every repo and links them from the repo folder, so deleting a model's folder
 would not free its space. Over plain HTTP every byte lands in the repo's `blobs/`, as
 `*.incomplete` until the file is complete.
+
+`snapshot_download` records the revision (`refs/main`) before it fetches the files, so a download
+also marks the model's folder until the worker succeeds. `cleanup()` removes a marked or
+`.incomplete` folder only once nothing has written to it for `STALE_AFTER_S`: a model Speaches is
+downloading at that moment is left alone.
 """
 
 import asyncio
 import logging
 import os
 import shutil
+import stat
 import sys
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
@@ -29,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 TERMINATE_GRACE_S = 5.0
 """How long a terminated worker may take to exit before it is killed."""
+STALE_AFTER_S = 600.0
+"""How long a half-written model must have gone unchanged before `cleanup()` removes it."""
+DOWNLOADING_MARKER = ".voice-tutor-downloading"
+"""In the model's folder from before the worker starts until it succeeds."""
 
 _HUB_TIMEOUT_S = 30.0
 _MB = 1_000_000
@@ -46,7 +57,8 @@ async def hub_total_size(model_id: str) -> int:
 
 
 class HfModelFiles:
-    """Downloads into `cache_dir`, one model at a time."""
+    """Downloads into `cache_dir`, one model at a time. Building one does file I/O: it
+    creates `cache_dir` and runs `cleanup()`."""
 
     def __init__(
         self,
@@ -90,11 +102,18 @@ class HfModelFiles:
         await asyncio.wait({task})
 
     async def delete(self, model_id: str) -> None:
-        await anyio.to_thread.run_sync(_delete, self._repo(model_id))
+        repo = self._repo(model_id)
+        try:
+            await anyio.to_thread.run_sync(_delete, repo)
+        except OSError as error:
+            raise SpeechSettingsError(
+                500, f"Could not delete {model_id}: {error.strerror or error}"
+            ) from error
 
     def cleanup(self) -> None:
+        quiet_since = time.time() - STALE_AFTER_S
         for repo in self._cache_dir.glob("models--*"):
-            if _is_partial(repo):
+            if _is_partial(repo) and _last_change(repo) < quiet_since:
                 _remove_partial(repo)
 
     def _repo(self, model_id: str) -> Path:
@@ -122,16 +141,18 @@ class HfModelFiles:
             )
 
     async def _run_worker(self, model_id: str, repo: Path, total: int) -> None:
-        process = await asyncio.create_subprocess_exec(
-            *self._worker,
-            model_id,
-            str(self._cache_dir),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, **_WORKER_ENV},
-        )
+        process: asyncio.subprocess.Process | None = None
         try:
+            await anyio.to_thread.run_sync(_mark_downloading, repo)
+            process = await asyncio.create_subprocess_exec(
+                *self._worker,
+                model_id,
+                str(self._cache_dir),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, **_WORKER_ENV},
+            )
             stderr = await self._watch(process, model_id, repo, total)
         except BaseException:  # cancelled: the worker must not outlive the download
             await asyncio.shield(_discard(process, repo))
@@ -143,6 +164,7 @@ class HfModelFiles:
             lines = text.strip().splitlines()
             reason = lines[-1] if lines else f"the worker exited with code {process.returncode}"
             raise SpeechSettingsError(502, f"Downloading {model_id} failed: {reason}")
+        await anyio.to_thread.run_sync(_unmark, repo)
 
     async def _watch(
         self, process: asyncio.subprocess.Process, model_id: str, repo: Path, total: int
@@ -160,8 +182,15 @@ class HfModelFiles:
         return exited.result()[1]
 
 
-async def _discard(process: asyncio.subprocess.Process, repo: Path) -> None:
-    """End the worker, then remove what it wrote."""
+async def _discard(process: asyncio.subprocess.Process | None, repo: Path) -> None:
+    """End the worker, if it started, then remove the model's folder."""
+    if process is not None:
+        await _stop(process)
+    await anyio.to_thread.run_sync(_remove_partial, repo)
+
+
+async def _stop(process: asyncio.subprocess.Process) -> None:
+    """Terminate the worker, and kill it if it is still running after `TERMINATE_GRACE_S`."""
     with suppress(ProcessLookupError):  # it has exited already
         process.terminate()
     try:
@@ -170,7 +199,15 @@ async def _discard(process: asyncio.subprocess.Process, repo: Path) -> None:
         with suppress(ProcessLookupError):
             process.kill()
         await process.communicate()
-    await anyio.to_thread.run_sync(_remove_partial, repo)
+
+
+def _mark_downloading(repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / DOWNLOADING_MARKER).touch()
+
+
+def _unmark(repo: Path) -> None:
+    (repo / DOWNLOADING_MARKER).unlink(missing_ok=True)
 
 
 def _bytes_on_disk(repo: Path) -> int:
@@ -184,8 +221,19 @@ def _bytes_on_disk(repo: Path) -> int:
 
 
 def _is_partial(repo: Path) -> bool:
-    """A blob is still being written, or the revision was never recorded."""
-    return any((repo / "blobs").glob("*.incomplete")) or not (repo / "refs" / "main").is_file()
+    """A blob is still being written, or a download of ours did not finish."""
+    return any((repo / "blobs").glob("*.incomplete")) or (repo / DOWNLOADING_MARKER).exists()
+
+
+def _last_change(repo: Path) -> float:
+    """When a file under `repo` was last modified (0 when there is none)."""
+    newest = 0.0
+    for path in repo.rglob("*"):
+        with suppress(FileNotFoundError):  # removed since it was listed
+            info = path.lstat()
+            if not stat.S_ISDIR(info.st_mode):
+                newest = max(newest, info.st_mtime)
+    return newest
 
 
 def _remove_partial(repo: Path) -> None:

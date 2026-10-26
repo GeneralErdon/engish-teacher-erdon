@@ -8,6 +8,7 @@ import asyncio
 import os
 import shutil
 import sys
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,7 +17,7 @@ import huggingface_hub
 import pytest
 
 from vt_api.adapters import model_download, model_files
-from vt_api.adapters.model_files import HfModelFiles
+from vt_api.adapters.model_files import DOWNLOADING_MARKER, HfModelFiles
 from vt_api.domain.speech import SpeechSettingsError
 from vt_api.ports.speech import ModelFiles
 
@@ -85,15 +86,24 @@ def hf_files(cache: Path, worker: Sequence[str]) -> HfModelFiles:
 
 
 def make_repo(
-    cache: Path, model_id: str, *, ref: bool = True, blobs: Sequence[str] = ("f00d",)
+    cache: Path, model_id: str, *, blobs: Sequence[str] = ("f00d",), marked: bool = False
 ) -> Path:
     repo = cache / ("models--" + model_id.replace("/", "--"))
     (repo / "blobs").mkdir(parents=True)
     for name in blobs:
         (repo / "blobs" / name).write_bytes(b"x" * 10)
-    if ref:
-        (repo / "refs").mkdir()
-        (repo / "refs" / "main").write_text("0" * 40)
+    (repo / "refs").mkdir()
+    (repo / "refs" / "main").write_text("0" * 40)
+    if marked:
+        (repo / DOWNLOADING_MARKER).touch()
+    return repo
+
+
+def gone_quiet(repo: Path) -> Path:
+    """Dates every file in `repo` back past the staleness threshold."""
+    then = time.time() - model_files.STALE_AFTER_S - 60
+    for path in [repo, *repo.rglob("*")]:
+        os.utime(path, (then, then))
     return repo
 
 
@@ -124,6 +134,17 @@ async def test_progress_counts_bytes_on_disk(tmp_path: Path, cache: Path) -> Non
     assert len(set(seen)) >= 3
     assert max(seen) <= TOTAL
     assert (cache / REPO / "blobs" / "f00d").stat().st_size == TOTAL
+
+
+async def test_a_download_marks_its_folder_until_it_succeeds(tmp_path: Path, cache: Path) -> None:
+    files = hf_files(cache, fake_worker(tmp_path))
+    download = asyncio.create_task(files.download(MODEL))
+    await until_bytes_on_disk(files)
+
+    assert (cache / REPO / DOWNLOADING_MARKER).exists()
+    await download
+    assert not (cache / REPO / DOWNLOADING_MARKER).exists()
+    assert (cache / REPO / "blobs" / "f00d").exists()
 
 
 async def test_cancel_stops_the_worker_and_removes_partial_files(
@@ -224,16 +245,24 @@ async def test_an_unreachable_hub_is_an_error(tmp_path: Path, cache: Path) -> No
     assert files.progress() is None
 
 
-def test_cleanup_removes_half_written_repos(cache: Path) -> None:
-    writing = make_repo(cache, "org/writing", blobs=("f00d", "beef.1a2b3c4d.incomplete"))
-    unrecorded = make_repo(cache, "org/unrecorded", ref=False)
-    complete = make_repo(cache, "org/complete")
+def test_cleanup_removes_half_written_repos_once_quiet(cache: Path) -> None:
+    writing = gone_quiet(make_repo(cache, "org/writing", blobs=("f00d", "beef.1a2b.incomplete")))
+    killed = gone_quiet(make_repo(cache, "org/killed", marked=True))  # api killed between files
+    complete = gone_quiet(make_repo(cache, "org/complete"))
 
     HfModelFiles(cache)
 
     assert not writing.exists()
-    assert not unrecorded.exists()
+    assert not killed.exists()
     assert complete.exists()
+
+
+def test_cleanup_keeps_a_download_still_being_written(cache: Path) -> None:
+    preloading = make_repo(cache, "org/preloading", blobs=("beef.1a2b.incomplete",))  # Speaches
+
+    HfModelFiles(cache)
+
+    assert preloading.exists()
 
 
 async def test_delete_removes_the_repo_folder(cache: Path) -> None:
@@ -246,6 +275,32 @@ async def test_delete_removes_the_repo_folder(cache: Path) -> None:
 
     assert not doomed.exists()
     assert kept.exists()
+
+
+async def test_a_delete_that_fails_says_why(cache: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    make_repo(cache, MODEL)
+    files = HfModelFiles(cache)
+
+    def refuse(path: object, *_args: object, **_kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(shutil, "rmtree", refuse)
+
+    with pytest.raises(SpeechSettingsError) as caught:
+        await files.delete(MODEL)
+
+    assert caught.value.status == 500
+    assert caught.value.message == "Could not delete org/m: Permission denied"
+
+
+async def test_a_worker_that_cannot_start_leaves_nothing(tmp_path: Path, cache: Path) -> None:
+    files = hf_files(cache, [str(tmp_path / "no-such-worker")])
+
+    with pytest.raises(FileNotFoundError):
+        await files.download(MODEL)
+
+    assert not (cache / REPO).exists()
+    assert files.progress() is None
 
 
 @pytest.mark.parametrize("model_id", ["..", "org/../..", "org\\..\\..", "org--x/y"])

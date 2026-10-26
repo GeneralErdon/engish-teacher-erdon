@@ -76,9 +76,11 @@ class ModelFiles(Protocol):
         ...
 
     async def delete(self, model_id: str) -> None:
-        """Remove the model's files; fine if there are none."""
+        """Remove the model's files; fine if there are none. Raises `SpeechSettingsError` (500)
+        when they cannot be removed."""
         ...
 
     def cleanup(self) -> None:
-        """Remove models a stopped api left half-written, so the server never lists them."""
+        """Remove the half-written models an api killed mid-download left behind, once nothing
+        has written to them for a while, so the server never lists them."""
         ...
