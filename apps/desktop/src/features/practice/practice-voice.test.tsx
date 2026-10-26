@@ -283,3 +283,44 @@ describe("The tutor's voice", () => {
     expect(FakePlayer.current).toBeUndefined() // no audio without a voice
   })
 })
+
+describe('Speech settings', () => {
+  it('a cut turn says so', async () => {
+    const { socket } = await openPractice()
+    socket.emit({
+      type: 'transcript.final',
+      v: 1,
+      turn_id: 't1',
+      text: 'Hello',
+      source: 'voice',
+      stt_ms: 500,
+      cut: true,
+    })
+
+    expect(screen.getByText('Cut at the turn limit')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Allow longer turns' })).toHaveAttribute(
+      'href',
+      '/settings',
+    )
+  })
+
+  it('does not mention a limit on a turn that was not cut', async () => {
+    const { socket } = await openPractice()
+    socket.emit(...spokenTurn())
+
+    expect(screen.queryByText('Cut at the turn limit')).not.toBeInTheDocument()
+  })
+
+  it('the missing-model warning shows', async () => {
+    const { socket } = await openPractice()
+    socket.emit({
+      type: 'error',
+      v: 1,
+      code: 'speech_model_missing',
+      message: 'The speech model you chose is gone. Pick another in Settings → Voice.',
+      retryable: true,
+    })
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/speech model you chose is gone/)
+  })
+})

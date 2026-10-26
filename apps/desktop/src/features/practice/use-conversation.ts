@@ -15,6 +15,8 @@ export interface Turn {
   source: 'text' | 'voice'
   /** Speech-to-text time, for spoken turns. */
   sttMs: number | null
+  /** The spoken turn went over the longest-turn setting and was transcribed up to it. */
+  cut: boolean
   reply: string
   replyDone: boolean
   interrupted: boolean
@@ -38,13 +40,7 @@ type Action =
   { type: 'status'; status: ConversationState['status'] } | { type: 'transcribing' } | ServerEvent
 
 /** Errors that end a transcription without a turn. */
-const SPEECH_ERRORS = new Set<string>([
-  'stt_failed',
-  'no_speech',
-  'audio_too_short',
-  'audio_too_long',
-  'not_started',
-])
+const SPEECH_ERRORS = new Set<string>(['stt_failed', 'no_speech', 'audio_too_short', 'not_started'])
 
 const initial: ConversationState = { status: 'connecting', turns: [], transcribing: false }
 
@@ -73,6 +69,7 @@ export function reducer(state: ConversationState, action: Action): ConversationS
             text: action.text,
             source: action.source,
             sttMs: action.stt_ms,
+            cut: action.cut,
             reply: '',
             replyDone: false,
             interrupted: false,
