@@ -11,11 +11,13 @@ from unittest.mock import AsyncMock, create_autospec
 import pytest
 from pydantic import SecretStr
 
+from vt_api.adapters.model_files import HfModelFiles
 from vt_api.adapters.speaches import SpeachesServer
 from vt_api.domain.audio import duration_s
 from vt_api.domain.llm import ChatMessage, LlmConfig, ProviderConfig, ProviderError
 from vt_api.domain.speech import (
     EngineUnreachable,
+    GpuProblem,
     Recognition,
     SessionSpeech,
     VoiceChoice,
@@ -265,15 +267,15 @@ def saved_speech() -> SavedSpeech:
 
 @pytest.fixture
 def speech(saved_speech: SavedSpeech, stt: FakeStt, tts: FakeTts, gpu: FakeGpu) -> SpeechService:
-    """Without the models folder, the GPU engine is unusable: tests put a conversation on it
-    through `for_session`."""
+    """The models folder makes the GPU engine usable, but holds nothing: tests put a
+    conversation on the GPU through `for_session`."""
     return SpeechService(
         repository=saved_speech,
         stt=stt,
         tts=tts,
         recognition_server=create_autospec(SpeachesServer, instance=True),
         voice_server=create_autospec(SpeachesServer, instance=True),
-        files=None,
+        files=create_autospec(HfModelFiles, instance=True),
         defaults=DEFAULTS,
         gpu_stt=gpu,
     )
@@ -889,18 +891,49 @@ async def _say(session: ConversationSession) -> None:
     await session.handle(InputCommit())
 
 
-async def test_start_warns_when_the_engine_is_unavailable(
-    session: ConversationSession, saved_speech: SavedSpeech, events: list[ServerEvent]
+@pytest.mark.parametrize(
+    ("problem", "label", "message"),
+    [
+        ("stopped", None, GPU_UNAVAILABLE),
+        (
+            "no_models_dir",
+            None,
+            "whisper.cpp (GPU) needs VT_SPEECH_MODELS_DIR, the models folder it shares with the "
+            "api: Speaches transcribes this conversation (see docs/configuration.md).",
+        ),
+        (
+            "no_model",
+            None,
+            "No whisper.cpp (GPU) model is downloaded: Speaches transcribes this conversation. "
+            "Download one in Settings → Voice, or run `just voice gpu`.",
+        ),
+        (
+            "load_failed",
+            "Whisper medium (English, 5-bit)",
+            "whisper.cpp (GPU) could not load Whisper medium (English, 5-bit), perhaps for lack "
+            "of GPU memory: Speaches transcribes this conversation. Choose a smaller GPU model "
+            "in Settings → Voice.",
+        ),
+    ],
+)
+async def test_start_says_why_the_gpu_does_not_transcribe(
+    session: ConversationSession,
+    speech: SpeechService,
+    events: list[ServerEvent],
+    problem: GpuProblem,
+    label: str | None,
+    message: str,
 ) -> None:
-    """Review Focus 4: whisper.cpp is saved, but the GPU engine is unusable (no models
-    folder here)."""
-    saved_speech.saved = DEFAULTS.model_copy(update={"stt_engine": "whispercpp"})
+    """Review Focus 3 and 4: whisper.cpp is saved, but cannot transcribe this conversation."""
+    speech.for_session = AsyncMock(  # type: ignore[method-assign]
+        return_value=replace(SPEECH, gpu_problem=problem, gpu_model_label=label)
+    )
 
     await session.handle(SessionStart())
 
     assert isinstance(events[0], SessionReady)  # the session still starts
     assert _of(ErrorEvent, events) == [
-        ErrorEvent(code="speech_engine_unavailable", message=GPU_UNAVAILABLE, retryable=True)
+        ErrorEvent(code="speech_engine_unavailable", message=message, retryable=True)
     ]
 
 

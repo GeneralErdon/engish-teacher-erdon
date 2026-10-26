@@ -19,6 +19,7 @@ from vt_api.adapters.sql.database import Database
 from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
 from vt_api.domain.llm import ProviderError
 from vt_api.domain.speech import (
+    GpuProblem,
     Recognition,
     SessionSpeech,
     SpeechSettingsError,
@@ -1447,7 +1448,7 @@ async def test_session_uses_the_gpu_and_loads_its_model(
     assert session.recognition == ON_THE_GPU
     assert gpu.loaded == [SMALL_Q8_PATH]
     assert session.fallback == ON_SPEACHES
-    assert (session.missing, session.engine_unavailable) == ((), None)
+    assert (session.missing, session.gpu_problem, session.gpu_model_label) == ((), None, None)
 
 
 async def test_a_speaches_session_never_asks_the_gpu(
@@ -1457,7 +1458,7 @@ async def test_a_speaches_session_never_asks_the_gpu(
 
     session = await service.for_session()
 
-    assert (session.recognition, session.fallback, session.engine_unavailable) == (
+    assert (session.recognition, session.fallback, session.gpu_problem) == (
         ON_SPEACHES,
         None,
         None,
@@ -1488,17 +1489,24 @@ async def test_view_and_status_do_not_load(
 
 
 @pytest.mark.parametrize(
-    "cause", ["stopped", "load fails", "no model file", "no models folder", "no GPU engine"]
+    ("cause", "problem"),
+    [
+        ("stopped", "stopped"),
+        ("no GPU engine", "stopped"),  # only tests leave the GPU server out
+        ("no models folder", "no_models_dir"),
+        ("no model file", "no_model"),
+    ],
 )
-async def test_session_falls_back_when_the_gpu_is_stopped(
+async def test_session_says_why_the_gpu_does_not_transcribe(
     build: Callable[..., SpeechService],
     speech_defaults: SpeechSettings,
     installed: set[str],
     gpu: FakeGpu,
     cause: str,
+    problem: GpuProblem,
 ) -> None:
-    """Review Focus 2, 3 and 4: the saved engine (here `VT_STT_BACKEND`) cannot transcribe, so
-    Speaches does, and the conversation says so."""
+    """Review Focus 2 and 4: the saved engine (here `VT_STT_BACKEND`) cannot transcribe, so
+    Speaches does, and the conversation says why."""
     installed.add(SMALL_Q8)
     changes: dict[str, Any] = {
         "defaults": speech_defaults.model_copy(update={"stt_engine": "whispercpp"})
@@ -1506,8 +1514,6 @@ async def test_session_falls_back_when_the_gpu_is_stopped(
     match cause:
         case "stopped":
             gpu.up = False
-        case "load fails":
-            gpu.load_error = LOAD_FAILED
         case "no model file":
             installed.discard(SMALL_Q8)
         case "no models folder":
@@ -1518,14 +1524,79 @@ async def test_session_falls_back_when_the_gpu_is_stopped(
 
     session = await service.for_session()
 
-    assert (session.recognition, session.fallback, session.engine_unavailable) == (
-        ON_SPEACHES,
-        None,
-        "whispercpp",
-    )
-    assert session.missing == ()
+    assert (session.recognition, session.fallback) == (ON_SPEACHES, None)
+    assert (session.gpu_problem, session.gpu_model_label) == (problem, None)
+    assert (session.missing, gpu.loaded) == ((), [])
     assert (await service.view()).missing == []
     await service.aclose()
+
+
+async def test_session_says_no_model_when_neither_the_choice_nor_the_default_is_there(
+    service: SpeechService, speech_defaults: SpeechSettings, installed: set[str], gpu: FakeGpu
+) -> None:
+    installed.add(MEDIUM_Q5)
+    await service.save(
+        speech_defaults.model_copy(update={"stt_engine": "whispercpp", "stt_gpu_model": MEDIUM_Q5})
+    )
+    installed.discard(MEDIUM_Q5)  # removed by hand; the default was never downloaded
+
+    session = await service.for_session()
+
+    assert (session.recognition, session.gpu_problem) == (ON_SPEACHES, "no_model")
+    assert gpu.loaded == []
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        LOAD_FAILED,  # the file did not load: the server exited and dropped the connection
+        ProviderError("connection", "http://localhost:8002/v1 did not answer in time."),
+    ],
+)
+async def test_session_says_which_gpu_model_did_not_load(
+    service: SpeechService,
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+    gpu: FakeGpu,
+    error: ProviderError,
+) -> None:
+    """Review Focus 3: by its catalog label, perhaps too big for the GPU's memory."""
+    installed |= {SMALL_Q8, MEDIUM_Q5}
+    await service.save(
+        speech_defaults.model_copy(update={"stt_engine": "whispercpp", "stt_gpu_model": MEDIUM_Q5})
+    )
+    gpu.load_error = error
+
+    session = await service.for_session()
+
+    assert (session.recognition, session.fallback) == (ON_SPEACHES, None)
+    assert (session.gpu_problem, session.gpu_model_label) == (
+        "load_failed",
+        "Whisper medium (English, 5-bit)",
+    )
+    assert gpu.loaded == [f"snapshots/{MEDIUM_Q5}"]
+    assert (await service.for_session()).gpu_problem == "load_failed"  # each start tries again
+    assert len(gpu.loaded) == 2
+
+
+async def test_a_configured_gpu_model_that_did_not_load_is_named_by_its_id(
+    build: Callable[..., SpeechService],
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+    gpu: FakeGpu,
+) -> None:
+    tiny = "ggerganov/whisper.cpp/ggml-tiny.en.bin"  # `VT_STT_GPU_MODEL`, not in the catalog
+    installed.add(tiny)
+    gpu.load_error = LOAD_FAILED
+    service = build(
+        defaults=speech_defaults.model_copy(
+            update={"stt_engine": "whispercpp", "stt_gpu_model": tiny}
+        )
+    )
+
+    session = await service.for_session()
+
+    assert (session.gpu_problem, session.gpu_model_label) == ("load_failed", tiny)
 
 
 async def test_missing_gpu_model_uses_the_gpu_default(

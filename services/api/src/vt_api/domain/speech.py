@@ -5,6 +5,7 @@ ties them to the saved settings.
 """
 
 from dataclasses import dataclass
+from typing import Literal
 
 from vt_api.domain.llm import ProviderError
 from vt_contracts.speech import SpeechKind, SttEngine
@@ -16,6 +17,11 @@ _GGML_REPO = "ggerganov/whisper.cpp"
 DEFAULT_GPU_MODEL = f"{_GGML_REPO}/ggml-small.en-q8_0.bin"
 """The whisper.cpp model until another is chosen (`VT_STT_GPU_MODEL`): `just voice gpu`
 downloads it before the server starts."""
+
+type GpuProblem = Literal["stopped", "no_models_dir", "no_model", "load_failed"]
+"""Why whisper.cpp (GPU), the chosen engine, cannot transcribe a conversation: its server does not
+answer (or there is none), `VT_SPEECH_MODELS_DIR` is unset, neither the chosen nor the default
+GGML file is downloaded, or the server could not load the file (perhaps too big for the GPU)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,8 +72,11 @@ class SessionSpeech:
     """Kinds whose saved model was not installed: the default stands in."""
     fallback: Recognition | None = None
     """Speaches, while the GPU transcribes: it takes over if the GPU server stops answering."""
-    engine_unavailable: SttEngine | None = None
-    """The chosen engine, when it cannot transcribe this conversation: Speaches stands in."""
+    gpu_problem: GpuProblem | None = None
+    """Why whisper.cpp (GPU), the chosen engine, cannot transcribe this conversation: Speaches
+    stands in."""
+    gpu_model_label: str | None = None
+    """With `load_failed`: the model that did not load, by its catalog label (else its id)."""
 
 
 def _recognition(

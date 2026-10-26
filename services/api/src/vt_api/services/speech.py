@@ -19,6 +19,7 @@ from vt_api.domain.audio import to_wav
 from vt_api.domain.llm import ProviderError
 from vt_api.domain.speech import (
     CatalogEntry,
+    GpuProblem,
     Recognition,
     SessionSpeech,
     SpeechSettingsError,
@@ -114,6 +115,17 @@ class _Measured:
 
     audio_s: float = 0.0
     ms: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class _OnTheGpu:
+    """What `_on_the_gpu` found: the GPU recognition, or why whisper.cpp, the chosen engine,
+    cannot transcribe. Neither when Speaches is the chosen engine."""
+
+    recognition: Recognition | None = None
+    problem: GpuProblem | None = None
+    model_label: str | None = None
+    """With `load_failed`: the model that did not load."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,15 +370,16 @@ class SpeechService:
         """A saved model that is no longer installed gives way to its track's default.
 
         With `stt_engine` whisper.cpp, the GPU transcribes when it can (see `_on_the_gpu`), with
-        Speaches as the fallback; when it cannot, Speaches does, and `engine_unavailable` says
-        so. `load` is for a conversation that starts: only it makes the GPU server load a model.
+        Speaches as the fallback; when it cannot, Speaches does, and `gpu_problem` says why.
+        `load` is for a conversation that starts: only it makes the GPU server load a model.
         """
-        stt_model, tts_model, gpu = await asyncio.gather(
+        stt_model, tts_model, on_the_gpu = await asyncio.gather(
             self._installed_or_default(_SPEACHES, settings.stt_model),
             self._installed_or_default(_VOICE, settings.tts_model),
             self._on_the_gpu(settings, load=load),
         )
         speaches = Recognition("openai", stt_model, stt_model)
+        gpu = on_the_gpu.recognition
         recognition = gpu if gpu is not None else speaches
         missing: list[SpeechKind] = []
         # Each engine keeps its own model: compare with the saved one of the engine in use.
@@ -381,34 +394,39 @@ class SpeechService:
             max_turn_s=settings.max_turn_s,
             missing=tuple(missing),
             fallback=speaches if gpu is not None else None,
-            engine_unavailable=(
-                "whispercpp" if settings.stt_engine == "whispercpp" and gpu is None else None
-            ),
+            gpu_problem=on_the_gpu.problem,
+            gpu_model_label=on_the_gpu.model_label,
         )
 
-    async def _on_the_gpu(self, settings: SpeechSettings, *, load: bool) -> Recognition | None:
-        """The GPU recognition, when `stt_engine` is whisper.cpp and it can transcribe: the
+    async def _on_the_gpu(self, settings: SpeechSettings, *, load: bool) -> _OnTheGpu:
+        """With `stt_engine` whisper.cpp, the GPU recognition when it can transcribe: the
         engine is usable (see `_gpu`), its server runs, and the models folder has the saved
         model, or else the GPU default. With `load`, the server loads it now: a `ProviderError`
-        there (the file did not load, and the server exited) counts as unavailable."""
-        gpu, files = self._gpu_stt, self._files
-        if settings.stt_engine != "whispercpp" or gpu is None or files is None:
-            return None
-        if not await gpu.running():
-            return None
+        there (the file did not load, and the server exited; or it timed out) is `load_failed`.
+        Each conversation start tries again: a model too big for the GPU fails each time, and
+        the warning says so."""
+        if settings.stt_engine != "whispercpp":
+            return _OnTheGpu()
+        gpu, files = self._gpu(), self._files
+        if files is None:
+            return _OnTheGpu(problem="no_models_dir")
+        if gpu is None or not await gpu.running():
+            return _OnTheGpu(problem="stopped")
         saved, default = settings.stt_gpu_model, self._default(_GPU)
         present = await files.present({saved, default})
         model = next((choice for choice in (saved, default) if choice in present), None)
         path = await files.snapshot_path(model) if model is not None else None
         if model is None or path is None:  # `path`: the file went since `present` saw it
-            return None
+            return _OnTheGpu(problem="no_model")
         if load:
             try:
                 await gpu.load(path)
             except ProviderError as error:
                 logger.warning("whisper.cpp (GPU) could not load %s: %s", model, error.message)
-                return None
-        return Recognition("whispercpp", model, path)
+                entry = entry_for(model)
+                label = entry.label if entry is not None else model
+                return _OnTheGpu(problem="load_failed", model_label=label)
+        return _OnTheGpu(recognition=Recognition("whispercpp", model, path))
 
     async def _installed_or_default(self, track: _Track, model_id: str) -> str:
         """`model_id`, unless the server says it is not installed (when it does not answer, a
@@ -463,8 +481,8 @@ class SpeechService:
         return self._gpu_stt if self._files is not None else None
 
     def _recognizer(self, engine: SttEngine) -> SpeechToText:
-        """The adapter of `engine`. `_session` picks whisper.cpp only when there is one."""
-        gpu = self._gpu_stt
+        """The adapter of `engine`. `_session` picks whisper.cpp only when it is usable."""
+        gpu = self._gpu()
         return gpu if engine == "whispercpp" and gpu is not None else self._stt
 
     async def _gpu_running(self) -> bool:

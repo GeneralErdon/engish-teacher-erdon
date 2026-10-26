@@ -17,7 +17,13 @@ from typing import Literal, assert_never
 
 from vt_api.domain.audio import duration_s, to_wav
 from vt_api.domain.llm import PROVIDERS, ChatMessage, ProviderError
-from vt_api.domain.speech import EngineUnreachable, Recognition, SessionSpeech, VoiceChoice
+from vt_api.domain.speech import (
+    EngineUnreachable,
+    GpuProblem,
+    Recognition,
+    SessionSpeech,
+    VoiceChoice,
+)
 from vt_api.ports.llm import ChatModel
 from vt_api.realtime.sentences import SentenceSplitter, speakable
 from vt_api.services.learner import LearnerService
@@ -64,11 +70,6 @@ _MISSING: dict[SpeechKind, str] = {
     "recognition": "speech recognition",
     "voice": "the tutor's voice",
 }
-# Only whisper.cpp (GPU) can be unavailable: Speaches is what stands in for it.
-_GPU_UNAVAILABLE = (
-    "whisper.cpp (GPU) is not running: Speaches transcribes this conversation. Start it with "
-    "`just voice gpu`, or choose Speaches in Settings → Voice."
-)
 _GPU_STOPPED = (
     "whisper.cpp (GPU) stopped answering: Speaches transcribes the rest of this conversation."
 )
@@ -143,8 +144,11 @@ class ConversationSession:
                 level=profile.level, provider=PROVIDERS[provider.kind].label, model=provider.model
             )
         )
-        if speech.engine_unavailable is not None:
-            await self._error("speech_engine_unavailable", _GPU_UNAVAILABLE)
+        if speech.gpu_problem is not None:
+            await self._error(
+                "speech_engine_unavailable",
+                _gpu_unavailable(speech.gpu_problem, speech.gpu_model_label),
+            )
         for kind in speech.missing:
             await self._error(
                 "speech_model_missing",
@@ -408,6 +412,35 @@ class _Speaker:
                 AssistantAudioStarted(turn_id=self._turn_id, sample_rate=OUTPUT_SAMPLE_RATE_HZ)
             )
         await self._send_audio(pcm)
+
+
+def _gpu_unavailable(problem: GpuProblem, model_label: str | None) -> str:
+    """Why whisper.cpp (GPU), the chosen engine, does not transcribe the conversation that
+    starts, and what to do. Only it can be unavailable: Speaches is what stands in for it."""
+    match problem:
+        case "stopped":
+            return (
+                "whisper.cpp (GPU) is not running: Speaches transcribes this conversation. Start "
+                "it with `just voice gpu`, or choose Speaches in Settings → Voice."
+            )
+        case "no_models_dir":
+            return (
+                "whisper.cpp (GPU) needs VT_SPEECH_MODELS_DIR, the models folder it shares with "
+                "the api: Speaches transcribes this conversation (see docs/configuration.md)."
+            )
+        case "no_model":
+            return (
+                "No whisper.cpp (GPU) model is downloaded: Speaches transcribes this "
+                "conversation. Download one in Settings → Voice, or run `just voice gpu`."
+            )
+        case "load_failed":
+            return (
+                f"whisper.cpp (GPU) could not load {model_label}, perhaps for lack of GPU "
+                "memory: Speaches transcribes this conversation. Choose a smaller GPU model in "
+                "Settings → Voice."
+            )
+        case _:
+            assert_never(problem)
 
 
 async def _cancel(task: asyncio.Task[None]) -> None:
