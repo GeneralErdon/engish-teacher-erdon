@@ -23,7 +23,15 @@ const READY = {
 } as const
 
 const turn = (text = 'Yesterday I have went to the beach') =>
-  ({ type: 'transcript.final', v: 1, turn_id: 't1', text, source: 'text', stt_ms: null }) as const
+  ({
+    type: 'transcript.final',
+    v: 1,
+    turn_id: 't1',
+    text,
+    source: 'text',
+    stt_ms: null,
+    cut: false,
+  }) as const
 
 async function openPractice() {
   const view = renderApp('/practice')

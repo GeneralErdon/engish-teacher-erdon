@@ -8,6 +8,7 @@ import { errorMessage } from '@/lib/api/errors'
 import { cn } from '@/lib/utils'
 
 import { useSpeechStatus } from './use-speech'
+import { VoiceSettings } from './voice-settings'
 
 type ModelStatus = Schemas['ModelStatus']
 
@@ -19,11 +20,21 @@ function Command({ children }: { children: string }) {
   )
 }
 
+/** Readiness first, then the choice of models, voice and turn length. */
+export function SpeechSection() {
+  return (
+    <div className="flex flex-col gap-6">
+      <Readiness />
+      <VoiceSettings />
+    </div>
+  )
+}
+
 /**
  * Are local speech recognition and the tutor's voice ready? Both run in Speaches; if something
  * is missing, the exact steps to get there.
  */
-export function SpeechSection() {
+function Readiness() {
   const speech = useSpeechStatus()
 
   if (!speech.data) {

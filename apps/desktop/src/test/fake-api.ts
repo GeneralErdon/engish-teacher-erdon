@@ -66,6 +66,83 @@ export const ENVIRONMENT: Settings = {
   ],
 }
 
+const STT_DEFAULT = 'Systran/faster-distil-whisper-small.en'
+const TTS_DEFAULT = 'speaches-ai/Kokoro-82M-v1.0-ONNX'
+
+const entry = (
+  fields: Pick<Schemas['SpeechModel'], 'key' | 'kind' | 'model_id' | 'label' | 'approx_mb'> &
+    Partial<Schemas['SpeechModel']>,
+): Schemas['SpeechModel'] => ({
+  hint: 'A good balance.',
+  english_only: true,
+  state: 'available',
+  download: null,
+  default: false,
+  selected: false,
+  from_configuration: false,
+  ms_per_audio_s: null,
+  ...fields,
+})
+
+/** The catalogue as a fresh install sees it: the defaults installed and in use. */
+export const SPEECH_MODELS: Schemas['SpeechModels'] = {
+  recognition_manageable: true,
+  voice_manageable: true,
+  last_error: null,
+  models: [
+    entry({
+      key: 'whisper-small-en',
+      kind: 'recognition',
+      model_id: STT_DEFAULT,
+      label: 'Whisper small (English)',
+      approx_mb: 250,
+      state: 'installed',
+      default: true,
+      selected: true,
+    }),
+    entry({
+      key: 'whisper-base',
+      kind: 'recognition',
+      model_id: 'Systran/faster-whisper-base',
+      label: 'Whisper base',
+      approx_mb: 145,
+      english_only: false,
+      state: 'installed',
+    }),
+    entry({
+      key: 'whisper-tiny-en',
+      kind: 'recognition',
+      model_id: 'Systran/faster-whisper-tiny.en',
+      label: 'Whisper tiny (English)',
+      approx_mb: 75,
+    }),
+    entry({
+      key: 'kokoro',
+      kind: 'voice',
+      model_id: TTS_DEFAULT,
+      label: 'Kokoro',
+      approx_mb: 330,
+      state: 'installed',
+      default: true,
+      selected: true,
+    }),
+    entry({
+      key: 'piper-lessac',
+      kind: 'voice',
+      model_id: 'speaches-ai/piper-en_US-lessac-medium',
+      label: 'Piper Lessac',
+      approx_mb: 60,
+    }),
+  ],
+}
+
+export const VOICES: Schemas['Voice'][] = [
+  { id: 'af_heart', name: 'Heart', accent: 'american', gender: 'female' },
+  { id: 'am_michael', name: 'Michael', accent: 'american', gender: 'male' },
+  { id: 'bf_emma', name: 'Emma', accent: 'british', gender: 'female' },
+  { id: 'bm_george', name: 'George', accent: 'british', gender: 'male' },
+]
+
 type Reply = Response | (() => Response | Promise<Response>)
 
 interface Overrides {
@@ -79,6 +156,10 @@ interface Overrides {
   test?: Reply
   save?: Reply
   reset?: Reply
+  speechSettings?: Reply
+  speechModels?: Reply
+  voices?: Reply
+  preview?: Reply
 }
 
 export interface FakeApi {
@@ -88,6 +169,11 @@ export interface FakeApi {
   /** Bodies the UI sent, by "METHOD /path". */
   sent: Map<string, unknown[]>
   settings: Settings
+  speechSettings: Schemas['SpeechSettingsView']
+  speechModels: Schemas['SpeechModels']
+  voices: Schemas['Voice'][]
+  /** Keys of downloads the fake moves on with every poll of the catalogue. */
+  advancing: Set<string>
 }
 
 const json = (body: unknown, status = 200) => Response.json(body, { status })
@@ -99,6 +185,19 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
     fetch: vi.fn<(request: Request) => Promise<Response>>(),
     sent,
     settings: structuredClone(ENVIRONMENT),
+    speechSettings: {
+      stt_model: STT_DEFAULT,
+      tts_model: TTS_DEFAULT,
+      tts_voice: 'af_heart',
+      tts_speed: 0.95,
+      max_turn_s: 120,
+      source: 'environment',
+      missing: [],
+      pending: [],
+    },
+    speechModels: structuredClone(SPEECH_MODELS),
+    voices: structuredClone(VOICES),
+    advancing: new Set(),
     learner: { level: 'B1', explanations: 'native', native_language: 'es', source: 'environment' },
     speech: {
       recognition: {
@@ -121,6 +220,40 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
   const reply = (override: Reply | undefined, fallback: () => Response | Promise<Response>) => {
     if (override === undefined) return fallback()
     return typeof override === 'function' ? override() : override.clone()
+  }
+
+  const setModel = (key: string, change: Partial<Schemas['SpeechModel']>) => {
+    api.speechModels.models = api.speechModels.models.map((m) =>
+      m.key === key ? { ...m, ...change } : m,
+    )
+  }
+  const select = (kind: Schemas['SpeechKind'], modelId: string) => {
+    api.speechModels.models = api.speechModels.models.map((m) =>
+      m.kind === kind ? { ...m, selected: m.model_id === modelId } : m,
+    )
+  }
+  /** Each poll of the catalogue moves a running download on; the second one finishes it. */
+  const advanceDownloads = () => {
+    for (const model of api.speechModels.models) {
+      if (!api.advancing.has(model.key)) continue
+      const total = model.download?.total_bytes ?? 100
+      const done = (model.download?.done_bytes ?? 0) + total / 2
+      if (done < total) {
+        setModel(model.key, { download: { done_bytes: done, total_bytes: total } })
+        continue
+      }
+      api.advancing.delete(model.key)
+      setModel(model.key, { state: 'installed', download: null })
+      const wanted = api.speechSettings.pending.includes(model.model_id)
+      if (wanted) {
+        api.speechSettings.pending = api.speechSettings.pending.filter(
+          (id) => id !== model.model_id,
+        )
+        const field = model.kind === 'recognition' ? 'stt_model' : 'tts_model'
+        api.speechSettings[field] = model.model_id
+        select(model.kind, model.model_id)
+      }
+    }
   }
 
   api.fetch.mockImplementation(async (request: Request) => {
@@ -187,8 +320,54 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
           api.settings = structuredClone(ENVIRONMENT)
           return json(api.settings)
         })
-      default:
+      case 'GET /v1/speech/settings':
+        return reply(overrides.speechSettings, () => json(api.speechSettings))
+      case 'PUT /v1/speech/settings': {
+        const body = sent.get(route)?.at(-1) as Schemas['SpeechSettings']
+        api.speechSettings = { ...api.speechSettings, ...body, source: 'saved' }
+        select('recognition', body.stt_model)
+        select('voice', body.tts_model)
+        return json(api.speechSettings)
+      }
+      case 'GET /v1/speech/models':
+        return reply(overrides.speechModels, () => {
+          advanceDownloads()
+          return json(api.speechModels)
+        })
+      case 'GET /v1/speech/voices':
+        return reply(overrides.voices, () => json(api.voices))
+      case 'POST /v1/speech/preview':
+        return reply(
+          overrides.preview,
+          () => new Response(new Blob(['RIFF']), { headers: { 'Content-Type': 'audio/wav' } }),
+        )
+      default: {
+        const download = /^\/v1\/speech\/models\/([^/]+)\/download$/.exec(pathname)
+        const uninstall = /^\/v1\/speech\/models\/([^/]+)$/.exec(pathname)
+        if (download && request.method === 'POST') {
+          const model = api.speechModels.models.find((m) => m.key === download[1])
+          if (!model) return json({ detail: 'Unknown model' }, 404)
+          const body = sent.get(route)?.at(-1) as { activate: boolean }
+          setModel(model.key, {
+            state: 'downloading',
+            download: { done_bytes: 0, total_bytes: 100 },
+          })
+          api.advancing.add(model.key)
+          if (body.activate) api.speechSettings.pending = [model.model_id]
+          return json(api.speechModels, 202)
+        }
+        if (download && request.method === 'DELETE') {
+          api.advancing.delete(download[1] ?? '')
+          setModel(download[1] ?? '', { state: 'available', download: null })
+          api.speechSettings.pending = []
+          return new Response(null, { status: 204 })
+        }
+        if (uninstall && request.method === 'DELETE') {
+          setModel(uninstall[1] ?? '', { state: 'available' })
+          return new Response(null, { status: 204 })
+        }
         return json({ detail: 'Not Found' }, 404)
+      }
     }
   })
   return api
