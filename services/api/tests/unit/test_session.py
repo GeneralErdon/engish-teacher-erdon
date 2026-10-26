@@ -280,12 +280,20 @@ def speech(saved_speech: SavedSpeech, stt: FakeStt, tts: FakeTts, gpu: FakeGpu) 
 
 
 @pytest.fixture
+def send_yields() -> bool:
+    """Whether sending an event lets other tasks run first, as a real socket can. Tests that
+    race two tasks across a send turn it on with `@pytest.mark.parametrize`."""
+    return False
+
+
+@pytest.fixture
 def session(
     chat: ScriptedChat,
     events: list[ServerEvent],
     audio: list[bytes],
     learner_service: LearnerService,
     speech: SpeechService,
+    send_yields: bool,
 ) -> ConversationSession:
     def factory(provider: ProviderConfig) -> ChatModel:
         return chat
@@ -303,6 +311,8 @@ def session(
     ticks = itertools.count()
 
     async def send(event: ServerEvent) -> None:
+        if send_yields:
+            await asyncio.sleep(0)
         events.append(event)
 
     async def send_audio(pcm: bytes) -> None:
@@ -936,6 +946,7 @@ async def test_gpu_unreachable_mid_conversation_switches_to_speaches_once(
     ]
 
 
+@pytest.mark.parametrize("send_yields", [True])
 async def test_two_turns_losing_the_gpu_together_warn_once(
     session: ConversationSession,
     speech: SpeechService,
@@ -943,6 +954,8 @@ async def test_two_turns_losing_the_gpu_together_warn_once(
     stt: FakeStt,
     events: list[ServerEvent],
 ) -> None:
+    """The warning's send yields, so the second turn runs while the first one warns: only a
+    switch made before that send keeps it from warning too."""
     _on_the_gpu(speech)
     gpu.error = EngineUnreachable("http://localhost:8002/v1")
     gpu.hold = asyncio.Event()
