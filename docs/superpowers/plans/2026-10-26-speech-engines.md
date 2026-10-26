@@ -154,7 +154,7 @@
     - remove the dangling `snapshots/*/<file>` links and the marker;
     - remove the repository folder only when no snapshot file is left.
 
-    Every other repository keeps today's whole-folder removal.
+    The same single-file-aware removal runs when a download fails or is cancelled (`_discard`, and the failed-worker path). Every other repository keeps today's whole-folder removal.
   - **`delete()` of a single-file id** removes that file's links and the blobs that no remaining link uses, then the folder once it is empty of snapshot files.
 
 - [ ] **Step 4: Run all Python checks**
@@ -323,11 +323,11 @@
     - A row saved before v0003 reads back with `stt_engine == "openai"` and `stt_gpu_model == DEFAULT_GPU_MODEL`. Use the migration's server defaults; the downgrade drops both columns.
     - A saved `stt_engine="whispercpp"` round-trips.
   - **Service.** The fixtures gain:
-    - a `FakeGpu` with `running` (a bool attribute), `load`, `transcribe` and `status`;
+    - a `FakeGpu` whose `running()` returns its `up` attribute, with `load`, `transcribe` and `status`;
     - a `FakeFiles.present` backed by the same `models` set.
   - **Service: `models()` and saving.**
     - `models()` lists the GPU rows with `engine="whispercpp"`. They are `installed` when present in the files, and `selected` matches `stt_gpu_model`.
-    - `engines` is `[{"openai", running=True, manageable=True}, {"whispercpp", running=<FakeGpu.running>, manageable=True}]`.
+    - `engines` is `[{"openai", running=True, manageable=True}, {"whispercpp", running=<FakeGpu.up>, manageable=True}]`.
     - Without `files`, whispercpp is `manageable=False`.
     - Without `gpu_stt`, it is `running=False`.
     - `test_switching_to_a_stopped_engine_is_refused`: saving `stt_engine="whispercpp"` while the GPU is not running gives 409, with the message ``whisper.cpp (GPU) is not running: start it with `just voice gpu` (Linux, AMD or Intel GPU).``
