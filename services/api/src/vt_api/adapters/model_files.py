@@ -10,7 +10,8 @@ would not free its space. Over plain HTTP every byte lands in the repo's `blobs/
 `snapshot_download` records the revision (`refs/main`) before it fetches the files, so a download
 also marks the model's folder until the worker succeeds. `cleanup()` removes a marked folder, or
 one with an unfinished blob, only once nothing has written to it for `STALE_AFTER_S`: a model
-Speaches is downloading at that moment is left alone.
+Speaches is downloading at that moment is left alone. Until then `incomplete()` names it, so the
+api does not count it as installed even if Speaches lists it.
 """
 
 import asyncio
@@ -110,11 +111,17 @@ class HfModelFiles:
                 500, f"Could not delete {model_id}: {error.strerror or error}"
             ) from error
 
+    async def incomplete(self) -> set[str]:
+        return await anyio.to_thread.run_sync(self._partial_models)
+
     def cleanup(self) -> None:
         quiet_since = time.time() - STALE_AFTER_S
         for repo in self._cache_dir.glob("models--*"):
             if _is_partial(repo) and _last_change(repo) < quiet_since:
                 _remove_partial(repo)
+
+    def _partial_models(self) -> set[str]:
+        return {_model_id(repo) for repo in self._cache_dir.glob("models--*") if _is_partial(repo)}
 
     def _repo(self, model_id: str) -> Path:
         """`models--{org}--{name}`. Raises `ValueError` for an id the Hub would refuse, so no
@@ -231,6 +238,11 @@ def _is_partial(repo: Path) -> bool:
     return (repo / DOWNLOADING_MARKER).exists() or any(
         not (blobs / part.name.split(".", 1)[0]).exists() for part in blobs.glob("*.incomplete")
     )
+
+
+def _model_id(repo: Path) -> str:
+    """`models--{org}--{name}` back to `{org}/{name}`: the Hub refuses `--` in an id."""
+    return repo.name.removeprefix("models--").replace("--", "/")
 
 
 def _last_change(repo: Path) -> float:

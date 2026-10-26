@@ -275,6 +275,29 @@ def test_cleanup_keeps_a_download_still_being_written(cache: Path) -> None:
     assert preloading.exists()
 
 
+async def test_incomplete_names_half_written_models_however_recent(cache: Path) -> None:
+    """A quick restart after a hard kill: `cleanup()` keeps these folders for now, and the
+    server may list them, but they are not installed."""
+    make_repo(cache, "org/writing", blobs=("f00d", "beef.1a2b.incomplete"))
+    make_repo(cache, "org/killed", marked=True)
+    make_repo(cache, "org/complete")
+    make_repo(cache, "org/stray", blobs=("f00d", "f00d.1a2b3c4d.incomplete"))
+    files: ModelFiles = HfModelFiles(cache)
+
+    assert await files.incomplete() == {"org/writing", "org/killed"}
+
+
+async def test_downloading_again_completes_a_killed_download(tmp_path: Path, cache: Path) -> None:
+    make_repo(cache, MODEL, blobs=(), marked=True)
+    files = hf_files(cache, fake_worker(tmp_path))
+    assert await files.incomplete() == {MODEL}
+
+    await files.download(MODEL)
+
+    assert await files.incomplete() == set()
+    assert (cache / REPO / "blobs" / "f00d").stat().st_size == TOTAL
+
+
 async def test_delete_removes_the_repo_folder(cache: Path) -> None:
     doomed = make_repo(cache, MODEL)
     kept = make_repo(cache, "org/other")

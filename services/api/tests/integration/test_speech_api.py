@@ -70,6 +70,9 @@ class FakeFiles:
     async def delete(self, model_id: str) -> None:
         return None
 
+    async def incomplete(self) -> set[str]:
+        return set()
+
     def cleanup(self) -> None:
         raise NotImplementedError
 

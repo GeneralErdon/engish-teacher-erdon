@@ -101,6 +101,8 @@ class FakeFiles:
         self.models = models
         self.calls = calls
         self.shared = True
+        self.partial: set[str] = set()
+        """Half-written folders, as an api killed mid-download leaves them."""
         self.error: Exception | None = None
         self.task: asyncio.Task[Any] | None = None
         """The task the running download is awaited in: the service's."""
@@ -124,6 +126,7 @@ class FakeFiles:
             self._progress = None
         if self.error is not None:
             raise self.error
+        self.partial.discard(model_id)
         if self.shared:
             self.models.add(model_id)
 
@@ -132,6 +135,9 @@ class FakeFiles:
 
     async def delete(self, model_id: str) -> None:
         self.calls.append(f"delete {model_id}")
+
+    async def incomplete(self) -> set[str]:
+        return set(self.partial)
 
     def cleanup(self) -> None:
         raise NotImplementedError  # the adapter runs it when it is built
@@ -814,6 +820,26 @@ async def test_downloading_an_installed_model_just_selects_it(
     await service.download("whisper-tiny-en", activate=True)  # installed: chosen, not a 409
     view = await service.view()
     assert (view.stt_model, view.pending) == (TINY, [])
+
+
+async def test_a_half_written_model_is_not_installed(
+    service: SpeechService, speech_defaults: SpeechSettings, installed: set[str], files: FakeFiles
+) -> None:
+    """A hard kill mid-download and a quick restart: Speaches lists the folder, but the files
+    are not all there, so the model can be downloaded again and not chosen meanwhile."""
+    installed.add(SMALL)
+    files.partial.add(SMALL)
+
+    assert _row(await service.models(), SMALL).state == "available"
+    with pytest.raises(SpeechSettingsError) as refused:
+        await service.save(speech_defaults.model_copy(update={"stt_model": SMALL}))
+    assert refused.value.status == 422
+
+    await service.download("whisper-small-en", activate=True)  # not "just select it"
+    await files.finish()
+
+    assert _row(await service.models(), SMALL).state == "installed"
+    assert (await service.view()).stt_model == SMALL
 
 
 async def test_preview_reports_a_voice_server_that_fails(

@@ -408,9 +408,12 @@ class SpeechService:
         )
 
     async def _installed(self, kind: SpeechKind) -> set[str]:
-        """The server's installed models, less one still downloading (its folder may already be
-        listed). Raises `ProviderError`."""
+        """The server's installed models, less those whose files are half-written: one still
+        downloading, or one an api killed mid-download left (the server may list their folders).
+        Raises `ProviderError`."""
         installed = await self._servers[kind].installed()
+        if self._files is not None:
+            installed -= await self._files.incomplete()
         running = self._running()
         if running is not None:
             installed.discard(running.entry.model_id)

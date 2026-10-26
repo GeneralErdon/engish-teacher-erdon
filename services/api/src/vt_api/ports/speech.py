@@ -81,6 +81,11 @@ class ModelFiles(Protocol):
         when they cannot be removed."""
         ...
 
+    async def incomplete(self) -> set[str]:
+        """The models whose files are half-written: a download that has not finished, or one an
+        api killed mid-download left. The server may list them, but they are not installed."""
+        ...
+
     def cleanup(self) -> None:
         """Remove the half-written models an api killed mid-download left behind, once nothing
         has written to them for a while, so the server never lists them."""
