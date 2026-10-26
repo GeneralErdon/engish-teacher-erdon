@@ -111,18 +111,25 @@ class SpeechService:
         return self._view(settings, saved=saved is not None, missing=missing)
 
     async def save(self, settings: SpeechSettings) -> SpeechSettingsView:
-        """Raises `SpeechSettingsError`: 422 for a model that is not installed or a voice the
-        model does not have, 502 when the server cannot tell what is installed."""
+        """Checks only what changed, so a saved model that went missing, or a server that does
+        not answer, never blocks the speed or the turn length.
+
+        Raises `SpeechSettingsError`: 422 for a model that is not installed or a voice the model
+        does not have, 502 when the server cannot tell what is installed."""
         async with self._settings_lock:
+            current = await self._settings()
             for kind in _KINDS:
-                await self._check_installed(kind, _model(settings, kind))
-            voices = {voice.id for voice in await self.voices(settings.tts_model)}
-            if voices and settings.tts_voice not in voices:
-                raise SpeechSettingsError(
-                    422, f"{settings.tts_model} has no voice {settings.tts_voice!r}."
-                )
-            await self._store(settings, await self._settings())
-        return self._view(settings, saved=True, missing=())
+                if _model(settings, kind) != _model(current, kind):
+                    await self._check_installed(kind, _model(settings, kind))
+            if (settings.tts_model, settings.tts_voice) != (current.tts_model, current.tts_voice):
+                voices = {voice.id for voice in await self.voices(settings.tts_model)}
+                if voices and settings.tts_voice not in voices:
+                    raise SpeechSettingsError(
+                        422, f"{settings.tts_model} has no voice {settings.tts_voice!r}."
+                    )
+            await self._store(settings, current)
+        missing = (await self._session(settings)).missing
+        return self._view(settings, saved=True, missing=missing)
 
     async def models(self) -> SpeechModels:
         settings = await self._settings()

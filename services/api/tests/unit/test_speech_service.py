@@ -296,6 +296,58 @@ async def test_save_refuses_a_voice_of_another_model(
     assert "af_heart" in refused.value.message
 
 
+async def test_speed_saves_while_the_saved_model_is_missing(
+    service: SpeechService,
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+    voice_server: FakeServer,
+) -> None:
+    """Only what changed is checked: a saved model wiped by hand, or a saved voice the server
+    no longer lists, does not block the other settings."""
+    installed.add(SMALL)
+    chosen = speech_defaults.model_copy(update={"stt_model": SMALL})
+    await service.save(chosen)
+    installed.discard(SMALL)
+    voice_server.voices_of[KOKORO] = [EMMA]
+
+    saved = await service.save(chosen.model_copy(update={"tts_speed": 0.8}))
+
+    assert (saved.stt_model, saved.tts_speed, saved.missing) == (SMALL, 0.8, ["recognition"])
+    assert (await service.view()).tts_speed == 0.8
+
+
+async def test_turn_length_saves_while_speaches_is_down(
+    service: SpeechService,
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+    recognition: FakeServer,
+    voice_server: FakeServer,
+) -> None:
+    installed.update({SMALL, KOKORO_INT8})
+    chosen = speech_defaults.model_copy(update={"stt_model": SMALL, "tts_model": KOKORO_INT8})
+    await service.save(chosen)
+    recognition.error = voice_server.error = UNREACHABLE
+
+    saved = await service.save(chosen.model_copy(update={"max_turn_s": 300}))
+
+    assert (saved.stt_model, saved.max_turn_s, saved.missing) == (SMALL, 300, [])
+
+
+async def test_changing_a_model_or_the_voice_still_checks_it(
+    service: SpeechService, speech_defaults: SpeechSettings, installed: set[str]
+) -> None:
+    installed.add(SMALL)
+    chosen = speech_defaults.model_copy(update={"stt_model": SMALL})
+    await service.save(chosen)
+    installed.discard(SMALL)
+
+    for change in ({"stt_model": TINY}, {"tts_voice": "nobody"}):
+        with pytest.raises(SpeechSettingsError) as refused:
+            await service.save(chosen.model_copy(update=change))
+        assert refused.value.status == 422
+    assert (await service.view()).stt_model == SMALL
+
+
 async def test_models_merge_catalog_installed_downloading_and_measured(
     service: SpeechService,
     installed: set[str],
