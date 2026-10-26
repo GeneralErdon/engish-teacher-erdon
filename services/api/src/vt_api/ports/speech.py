@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator
 from typing import Protocol
 
-from vt_contracts.speech import ModelStatus
+from vt_contracts.speech import ModelStatus, SpeechSettings
 
 
 class SpeechToText(Protocol):
@@ -25,3 +25,11 @@ class TextToSpeech(Protocol):
     async def status(self) -> ModelStatus:
         """Whether the server answers and has the model; never raises."""
         ...
+
+
+class SpeechSettingsRepository(Protocol):
+    async def load(self) -> SpeechSettings | None:
+        """The saved settings, or `None` when nothing usable is saved."""
+        ...
+
+    async def save(self, settings: SpeechSettings) -> None: ...
