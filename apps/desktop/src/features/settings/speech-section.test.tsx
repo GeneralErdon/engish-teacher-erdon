@@ -65,6 +65,17 @@ describe('Voice settings', () => {
     expect(await screen.findByText(TTS)).toBeInTheDocument()
   })
 
+  it('names whisper.cpp and its start command when it transcribes', async () => {
+    const api = fakeApi()
+    api.speech.recognition_engine = 'whispercpp'
+    notReady(api, 'recognition', false)
+    renderApp('/settings', api)
+
+    expect(await screen.findByText('Speech recognition · whisper.cpp (GPU)')).toBeInTheDocument()
+    expect(section().getByText('just voice gpu')).toBeInTheDocument()
+    expect(section().queryByText('just voice')).not.toBeInTheDocument()
+  })
+
   it('lists each server when they differ', async () => {
     const api = fakeApi()
     api.speech.synthesis.base_url = 'http://localhost:8880/v1'

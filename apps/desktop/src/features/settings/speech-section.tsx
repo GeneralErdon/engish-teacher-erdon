@@ -47,14 +47,18 @@ function Readiness() {
     )
   }
 
-  const { recognition, synthesis } = speech.data
+  const { recognition, synthesis, recognition_engine: engine } = speech.data
+  const gpu = engine === 'whispercpp'
   const missing = [recognition, synthesis].filter((status) => !status.model_ready)
   const stopped = missing.some((status) => !status.reachable)
   const servers = [...new Set([recognition.base_url, synthesis.base_url])]
   return (
     <div className="flex flex-col gap-4">
       <ul className="flex flex-col gap-2">
-        <ModelRow label="Speech recognition" status={recognition} />
+        <ModelRow
+          label={gpu ? 'Speech recognition · whisper.cpp (GPU)' : 'Speech recognition'}
+          status={recognition}
+        />
         <ModelRow label="Tutor's voice" status={synthesis} />
       </ul>
       {missing.length > 0 && (
@@ -67,7 +71,7 @@ function Readiness() {
                 ? 'Start Speaches, which runs both on your machine. The first start downloads the models (~700 MB) and waits until they are ready:'
                 : 'Run this again: it downloads what is missing.'}
             </span>
-            <Command>just voice</Command>
+            <Command>{gpu ? 'just voice gpu' : 'just voice'}</Command>
             {!stopped && (
               <>
                 <span>Or, on a Speaches you started yourself:</span>

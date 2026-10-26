@@ -631,3 +631,145 @@ describe('playPreview', () => {
     expect(played).toEqual(['blob:preview'])
   })
 })
+
+const GPU_SMALL = 'ggerganov/whisper.cpp/ggml-small.en-q8_0.bin'
+const GPU_BASE = 'ggerganov/whisper.cpp/ggml-base.en-q5_1.bin'
+
+function gpuRunning(api: FakeApi, running = true) {
+  api.speechModels.engines = api.speechModels.engines.map((state) =>
+    state.engine === 'whispercpp' ? { ...state, running } : state,
+  )
+}
+
+describe('Speech recognition engine', () => {
+  it('switching the engine saves it and leaves the other fields as they were', async () => {
+    const api = fakeApi()
+    gpuRunning(api)
+    const { user } = renderApp('/settings', api)
+    const engine = await screen.findByRole('radiogroup', { name: 'Speech recognition engine' })
+
+    await user.click(within(engine).getByRole('radio', { name: 'whisper.cpp · GPU' }))
+
+    expect(await screen.findByText('Saved')).toBeInTheDocument()
+    expect(api.sent.get('PUT /v1/speech/settings')?.at(-1)).toEqual({
+      stt_model: 'Systran/faster-distil-whisper-small.en',
+      stt_engine: 'whispercpp',
+      stt_gpu_model: GPU_SMALL,
+      tts_model: 'speaches-ai/Kokoro-82M-v1.0-ONNX',
+      tts_voice: 'af_heart',
+      tts_speed: 0.95,
+      max_turn_s: 120,
+    })
+  })
+
+  it('cannot switch to a stopped engine', async () => {
+    renderApp('/settings')
+    const engine = await screen.findByRole('radiogroup', { name: 'Speech recognition engine' })
+
+    expect(within(engine).getByRole('radio', { name: 'whisper.cpp · GPU' })).toBeDisabled()
+  })
+
+  it('lists only the GPU models under whisper.cpp, and Use keeps the CPU model', async () => {
+    const api = fakeApi()
+    gpuRunning(api)
+    api.speechSettings.stt_engine = 'whispercpp'
+    const { user } = renderApp('/settings', api)
+    const list = await recognition()
+
+    expect(within(list).queryByRole('radio', { name: 'Whisper base' })).not.toBeInTheDocument()
+    expect(row(list, 'whisper.cpp small (English, q8)').getByText('In use')).toBeInTheDocument()
+
+    await user.click(
+      row(list, 'whisper.cpp base (English, q5)').getByRole('button', { name: 'Use' }),
+    )
+
+    expect(await screen.findByText('Saved')).toBeInTheDocument()
+    expect(api.sent.get('PUT /v1/speech/settings')?.at(-1)).toMatchObject({
+      stt_engine: 'whispercpp',
+      stt_gpu_model: GPU_BASE,
+      stt_model: 'Systran/faster-distil-whisper-small.en',
+    })
+    expect(row(list, 'whisper.cpp base (English, q5)').getByText('In use')).toBeInTheDocument()
+  })
+
+  it('says Speaches is used meanwhile when the saved engine is stopped', async () => {
+    const api = fakeApi()
+    api.speechSettings.stt_engine = 'whispercpp'
+    renderApp('/settings', api)
+
+    expect(
+      await screen.findByText('whisper.cpp (GPU) is not running: Speaches is used meanwhile.'),
+    ).toBeInTheDocument()
+  })
+
+  it('does not say it while the engine runs', async () => {
+    const api = fakeApi()
+    gpuRunning(api)
+    api.speechSettings.stt_engine = 'whispercpp'
+    renderApp('/settings', api)
+    await recognition()
+
+    expect(screen.queryByText(/is not running/)).not.toBeInTheDocument()
+  })
+
+  it('estimates the turn with the model of the engine in use', async () => {
+    const api = fakeApi()
+    gpuRunning(api)
+    api.speechSettings.stt_engine = 'whispercpp'
+    api.speechModels.models = api.speechModels.models.map((m) =>
+      m.key === 'ggml-small-en-q8' ? { ...m, ms_per_audio_s: 60 } : m,
+    )
+    measured(api, 500)
+    renderApp('/settings', api)
+
+    expect(
+      await screen.findByText(
+        /With whisper\.cpp small \(English, q8\), 2 min of speech take about 7 s/,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('names the default of the engine in use when the saved model is missing', async () => {
+    const api = fakeApi()
+    gpuRunning(api)
+    api.speechSettings.stt_engine = 'whispercpp'
+    api.speechSettings.missing = ['recognition']
+    renderApp('/settings', api)
+
+    expect(
+      await screen.findByText(
+        'Your saved speech recognition model is not installed: whisper.cpp small (English, q8) is used meanwhile.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('names the Speaches default when the saved GPU engine is stopped', async () => {
+    const api = fakeApi()
+    api.speechSettings.stt_engine = 'whispercpp'
+    api.speechSettings.missing = ['recognition']
+    renderApp('/settings', api)
+
+    expect(
+      await screen.findByText(
+        'Your saved speech recognition model is not installed: Whisper small (English) is used meanwhile.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('shows why a switch was refused', async () => {
+    const api = fakeApi()
+    gpuRunning(api)
+    const { user } = renderApp('/settings', api)
+    const engine = await screen.findByRole('radiogroup', { name: 'Speech recognition engine' })
+    const original = globalThis.fetch
+    vi.stubGlobal('fetch', (request: Request) =>
+      request.method === 'PUT'
+        ? Promise.resolve(failure(409, 'whisper.cpp (GPU) is not running.')())
+        : original(request),
+    )
+
+    await user.click(within(engine).getByRole('radio', { name: 'whisper.cpp · GPU' }))
+
+    expect(await screen.findByText('whisper.cpp (GPU) is not running.')).toBeInTheDocument()
+  })
+})

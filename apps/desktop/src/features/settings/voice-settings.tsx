@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import type { Schemas } from '@/lib/api/client'
 import { errorMessage } from '@/lib/api/errors'
 
+import { EngineChoice } from './engine-choice'
 import { ModelList } from './speech-models'
 import { TurnLength } from './turn-length'
 import {
@@ -16,6 +17,7 @@ import {
 } from './use-speech'
 import { VoicePicker } from './voice-picker'
 
+type Engine = Schemas['SttEngine']
 type Model = Schemas['SpeechModel']
 type Settings = Schemas['SpeechSettings']
 type View = Schemas['SpeechSettingsView']
@@ -44,7 +46,11 @@ export function VoiceSettings() {
   }
 
   const view = settings.data
-  const { models, last_error: lastError } = catalogue.data
+  const { models, engines, last_error: lastError } = catalogue.data
+  const running = (engine: Engine) => engines.find((state) => state.engine === engine)?.running
+  // The saved engine, unless it is down: the api then transcribes with Speaches.
+  const engineInUse: Engine = running(view.stt_engine) ? view.stt_engine : 'openai'
+  const gpuDown = view.stt_engine === 'whispercpp' && engineInUse === 'openai'
   /** The settings as cached when a change is sent, not as rendered: a save may have landed since. */
   const latest = (): Settings => {
     const cached = queryClient.getQueryData<View>(speechSettingsQuery.queryKey) ?? view
@@ -64,7 +70,12 @@ export function VoiceSettings() {
 
   const chooseModel = async (model: Model) => {
     if (model.kind === 'recognition') {
-      update({ stt_model: model.model_id })
+      // Each engine keeps its own model: choosing one never touches the other's.
+      update(
+        model.engine === 'whispercpp'
+          ? { stt_gpu_model: model.model_id }
+          : { stt_model: model.model_id },
+      )
       return
     }
     // Keep the voice if the new model has it, else its first: the api re-validates anyway.
@@ -87,8 +98,21 @@ export function VoiceSettings() {
           <AlertDescription>{lastError}</AlertDescription>
         </Alert>
       )}
+      {gpuDown && (
+        <Alert>
+          <TriangleAlert className="text-warning" />
+          <AlertDescription>
+            whisper.cpp (GPU) is not running: Speaches is used meanwhile.
+          </AlertDescription>
+        </Alert>
+      )}
       {view.missing.map((kind) => {
-        const fallback = models.find((model) => model.kind === kind && model.default)
+        const fallback = models.find(
+          (model) =>
+            model.kind === kind &&
+            model.default &&
+            (kind === 'voice' || model.engine === engineInUse),
+        )
         return (
           <Alert key={kind}>
             <TriangleAlert className="text-warning" />
@@ -101,11 +125,24 @@ export function VoiceSettings() {
 
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-medium">Speech recognition</h3>
+        <EngineChoice
+          engines={engines}
+          value={view.stt_engine}
+          disabled={save.isPending}
+          onChange={(engine) => {
+            update({ stt_engine: engine })
+          }}
+        />
         <ModelList
           label="Speech recognition model"
           kind="recognition"
+          engine={view.stt_engine}
           models={models}
-          manageable={catalogue.data.recognition_manageable}
+          manageable={
+            view.stt_engine === 'whispercpp'
+              ? (engines.find((state) => state.engine === 'whispercpp')?.manageable ?? false)
+              : catalogue.data.recognition_manageable
+          }
           pending={view.pending}
           disabled={save.isPending}
           onUse={(model) => void chooseModel(model)}
@@ -114,7 +151,9 @@ export function VoiceSettings() {
 
       <TurnLength
         maxTurnS={view.max_turn_s}
-        model={models.find((model) => model.kind === 'recognition' && model.selected)}
+        model={models.find(
+          (model) => model.kind === 'recognition' && model.engine === engineInUse && model.selected,
+        )}
         disabled={save.isPending}
         onChange={(seconds) => {
           update({ max_turn_s: seconds })

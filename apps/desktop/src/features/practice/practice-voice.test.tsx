@@ -323,4 +323,17 @@ describe('Speech settings', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent(/speech model you chose is gone/)
   })
+
+  it('the engine warning shows and transcription goes on', async () => {
+    const { socket } = await openPractice()
+    socket.emit({
+      type: 'error',
+      v: 1,
+      code: 'speech_engine_unavailable',
+      message: 'whisper.cpp (GPU) stopped: Speaches transcribes meanwhile.',
+      retryable: true,
+    })
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/whisper.cpp \(GPU\) stopped/)
+  })
 })
