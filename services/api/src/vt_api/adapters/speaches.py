@@ -17,18 +17,21 @@ class SpeachesServer:
         self._http = http
         self._v1 = base_url.rstrip("/")
         self._root = self._v1.removesuffix("/v1")
-        self._registry: list[dict[str, Any]] | None = None
+        self._registry: list[Any] | None = None
 
     async def is_speaches(self) -> bool:
         try:
-            body = await self._get_json(f"{self._root}/v1/registry")
+            await self._get_data(f"{self._root}/v1/registry")
         except ProviderError:
             return False
-        return isinstance(body, dict) and isinstance(body.get("data"), list)
+        return True
 
     async def installed(self) -> set[str]:
-        body = await self._get_json(f"{self._root}/v1/models")
-        return {model["id"] for model in body["data"]}
+        data = await self._get_data(f"{self._root}/v1/models")
+        try:
+            return {model["id"] for model in data}
+        except (TypeError, KeyError) as error:
+            raise self._unexpected() from error
 
     async def voices(self, model_id: str) -> list[Voice]:
         for model in await self._tts_registry():
@@ -42,16 +45,30 @@ class SpeachesServer:
         if response.status_code != 404:  # 404: the model was not loaded
             _raise_for_status(response)
 
-    async def _tts_registry(self) -> list[dict[str, Any]]:
+    async def _tts_registry(self) -> list[Any]:
         if self._registry is None:
-            body = await self._get_json(f"{self._root}/v1/registry", {"task": "text-to-speech"})
-            self._registry = body["data"]
+            self._registry = await self._get_data(
+                f"{self._root}/v1/registry", {"task": "text-to-speech"}
+            )
         return self._registry
 
     async def _get_json(self, url: str, params: dict[str, str] | None = None) -> Any:
         response = await self._send("GET", url, params)
         _raise_for_status(response)
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as error:
+            raise self._unexpected() from error
+
+    async def _get_data(self, url: str, params: dict[str, str] | None = None) -> list[Any]:
+        body = await self._get_json(url, params)
+        if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+            raise self._unexpected()
+        data: list[Any] = body["data"]
+        return data
+
+    def _unexpected(self) -> ProviderError:
+        return ProviderError("bad_request", f"{self._root} did not answer like a Speaches server.")
 
     async def _send(
         self, method: str, url: str, params: dict[str, str] | None = None

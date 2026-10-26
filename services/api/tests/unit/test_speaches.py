@@ -190,3 +190,35 @@ async def test_unload_failure_raises_provider_error(fake: Fake, server: Speaches
 
     with pytest.raises(ProviderError):
         await server.unload(KOKORO)
+
+
+async def test_non_json_answer_raises_provider_error(fake: Fake, server: SpeachesServer) -> None:
+    fake.handler = lambda _r: httpx2.Response(200, text="<html>hi</html>")
+
+    with pytest.raises(ProviderError):
+        await server.installed()
+
+
+async def test_is_speaches_false_for_non_json_answer(fake: Fake, server: SpeachesServer) -> None:
+    fake.handler = lambda _r: httpx2.Response(200, text="<html>hi</html>")
+
+    assert await server.is_speaches() is False
+
+
+@pytest.mark.parametrize("body", [{"hello": 1}, {"data": [{"name": "no id"}]}, {"data": [1]}])
+async def test_unexpected_models_shape_raises_provider_error(
+    fake: Fake, server: SpeachesServer, body: dict[str, object]
+) -> None:
+    fake.handler = lambda _r: httpx2.Response(200, json=body)
+
+    with pytest.raises(ProviderError):
+        await server.installed()
+
+
+async def test_unexpected_registry_shape_raises_provider_error(
+    fake: Fake, server: SpeachesServer
+) -> None:
+    fake.handler = lambda _r: httpx2.Response(200, json=[1, 2])
+
+    with pytest.raises(ProviderError):
+        await server.voices(KOKORO)
