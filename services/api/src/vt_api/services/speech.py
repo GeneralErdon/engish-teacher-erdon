@@ -3,8 +3,9 @@
 
 The learner chooses one model on each *track*: speech recognition on Speaches, speech recognition
 on whisper.cpp (GPU), and the voice; `stt_engine` says which recognition engine to use. Models are
-downloaded and uninstalled only where a track is *manageable*: Speaches, with
-`VT_SPEECH_MODELS_DIR` set. Any other OpenAI-compatible server keeps working, with read-only lists.
+downloaded and uninstalled only where a track is *manageable*: Speaches or whisper.cpp (GPU), with
+`VT_SPEECH_MODELS_DIR` set. Any other OpenAI-compatible server keeps working, with read-only
+lists.
 """
 
 import asyncio
@@ -12,6 +13,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 from vt_api.domain.audio import to_wav
 from vt_api.domain.llm import ProviderError
@@ -53,20 +55,34 @@ _NOT_SEEN_BY_SPEACHES = (
     "Downloaded, but Speaches does not see it: VT_SPEECH_MODELS_DIR must be the folder Speaches "
     "reads (see docs/configuration.md)"
 )
-_NAMES: dict[SpeechKind, str] = {"recognition": "speech recognition", "voice": "voice"}
-
 type _Track = tuple[SpeechKind, SttEngine]
 """A list of models the learner chooses one from."""
 _SPEACHES: _Track = ("recognition", "openai")
 _GPU: _Track = ("recognition", "whispercpp")
 _VOICE: _Track = ("voice", "openai")
 _TRACKS: tuple[_Track, ...] = (_SPEACHES, _GPU, _VOICE)
-_FIELDS: dict[_Track, str] = {_SPEACHES: "stt_model", _GPU: "stt_gpu_model", _VOICE: "tts_model"}
+_FIELDS: dict[_Track, Literal["stt_model", "stt_gpu_model", "tts_model"]] = {
+    _SPEACHES: "stt_model",
+    _GPU: "stt_gpu_model",
+    _VOICE: "tts_model",
+}
 """The setting that holds each track's model: each engine keeps its own choice."""
-_WHAT: dict[_Track, str] = {
-    _SPEACHES: "a speech recognition model",
-    _GPU: "a speech recognition model for whisper.cpp",
-    _VOICE: "a voice model",
+
+
+@dataclass(frozen=True, slots=True)
+class _Wording:
+    """How messages name a track's models."""
+
+    models_of: str
+    """"Models for ..." """
+    one_of: str
+    """"... is not <one_of>." """
+
+
+_WORDING: dict[_Track, _Wording] = {
+    _SPEACHES: _Wording("speech recognition", "a speech recognition model"),
+    _GPU: _Wording("whisper.cpp (GPU)", "a speech recognition model for whisper.cpp"),
+    _VOICE: _Wording("voice", "a voice model"),
 }
 _NOT_RUNNING: dict[SttEngine, str] = {
     "openai": "Speaches is not running: start it with `just voice`.",
@@ -105,9 +121,10 @@ class _TrackModels:
 
     rows: list[SpeechModel]
     manageable: bool
+    """Its models can be downloaded and uninstalled: `_files_for` gives the files."""
     answered: bool
     """Its server said what is installed: Speaches is running. Always, on the GPU track, whose
-    files the api reads itself."""
+    files the api reads itself; whether its server runs is `_gpu_running`."""
 
 
 class SpeechService:
@@ -193,7 +210,7 @@ class SpeechService:
                     engine="openai", running=speaches.answered, manageable=speaches.manageable
                 ),
                 SpeechEngineState(
-                    engine="whispercpp", running=gpu_running, manageable=self._gpu() is not None
+                    engine="whispercpp", running=gpu_running, manageable=gpu.manageable
                 ),
             ],
             last_error=self._last_error,
@@ -221,7 +238,7 @@ class SpeechService:
                 409, f"{running.entry.label} is downloading: wait for it, or cancel it first."
             )
         elif files is None:
-            raise _unmanageable(entry.kind)
+            raise _unmanageable(_track_of(entry))
         else:
             download = _Download(entry, activate)
             download.task = asyncio.create_task(self._run(download, files))
@@ -259,11 +276,12 @@ class SpeechService:
             )
         files = await self._files_for(track)
         if files is None:
-            raise _unmanageable(entry.kind)
-        try:
-            await self._servers[entry.kind].unload(entry.model_id)
-        except ProviderError as error:  # not fatal: the files still go
-            logger.warning("Could not unload %s: %s", entry.model_id, error.message)
+            raise _unmanageable(track)
+        if track != _GPU:  # the GPU server loads a file only to transcribe, and keeps none
+            try:
+                await self._servers[entry.kind].unload(entry.model_id)
+            except ProviderError as error:  # not fatal: the files still go
+                logger.warning("Could not unload %s: %s", entry.model_id, error.message)
         await files.delete(entry.model_id)
 
     async def voices(self, model_id: str) -> list[Voice]:
@@ -363,7 +381,9 @@ class SpeechService:
         if model_id == self._default(track):
             return
         if all(entry.model_id != model_id for entry in self._catalog(track)):
-            raise SpeechSettingsError(422, f"{model_id} is not {_WHAT[track]}.")
+            raise SpeechSettingsError(422, f"{model_id} is not {_WORDING[track].one_of}.")
+        if track == _GPU and self._files is None:  # it cannot be downloaded either
+            raise SpeechSettingsError(422, _GPU_NEEDS_FILES)
         try:
             installed = await self._installed(track)
         except ProviderError as error:
@@ -420,10 +440,10 @@ class SpeechService:
             if download is not None and not download.activate:
                 return
             current = await self._settings()
-            update = {_FIELDS[_track_of(entry)]: entry.model_id}
+            chosen = current.model_copy(update={_FIELDS[_track_of(entry)]: entry.model_id})
             if voices and current.tts_voice not in voices:
-                update["tts_voice"] = voices[0]
-            await self._store(current.model_copy(update=update), current)
+                chosen = chosen.model_copy(update={"tts_voice": voices[0]})
+            await self._store(chosen, current)
 
     async def _run(self, download: _Download, files: ModelFiles) -> None:
         """The background download. A failure ends up in `last_error`, never as an unretrieved
@@ -432,7 +452,11 @@ class SpeechService:
         try:
             await files.download(entry.model_id)
             # The server itself, not `_installed()`: that leaves out the model still downloading.
-            if entry.model_id not in await self._servers[entry.kind].installed():
+            # The GPU server never lists its files: they are found in the models folder.
+            if (
+                _track_of(entry) != _GPU
+                and entry.model_id not in await self._servers[entry.kind].installed()
+            ):
                 self._last_error = _NOT_SEEN_BY_SPEACHES
                 try:  # nothing can use the files, so they would only take space
                     await files.delete(entry.model_id)
@@ -531,13 +555,12 @@ class SpeechService:
             return False
 
     async def _files_for(self, track: _Track) -> ModelFiles | None:
-        """The model files when the track is manageable: Speaches, with `VT_SPEECH_MODELS_DIR`."""
+        """The model files when the track is manageable: with `VT_SPEECH_MODELS_DIR`, on Speaches
+        and on the GPU engine (whose server need not be running)."""
         kind, engine = track
-        if (
-            engine == "openai"
-            and self._files is not None
-            and await self._servers[kind].is_speaches()
-        ):
+        if engine == "whispercpp":
+            return self._files if self._gpu() is not None else None
+        if self._files is not None and await self._servers[kind].is_speaches():
             return self._files
         return None
 
@@ -561,14 +584,16 @@ def _track_of(entry: CatalogEntry) -> _Track:
 
 
 def _model(settings: SpeechSettings, track: _Track) -> str:
-    model: str = getattr(settings, _FIELDS[track])
-    return model
+    if track == _GPU:
+        return settings.stt_gpu_model
+    return settings.tts_model if track == _VOICE else settings.stt_model
 
 
-def _unmanageable(kind: SpeechKind) -> SpeechSettingsError:
+def _unmanageable(track: _Track) -> SpeechSettingsError:
+    where = "only with" if track == _GPU else "only on Speaches, with"
     return SpeechSettingsError(
         409,
-        f"Models for {_NAMES[kind]} can be downloaded and uninstalled only on Speaches, with "
+        f"Models for {_WORDING[track].models_of} can be downloaded and uninstalled {where} "
         "VT_SPEECH_MODELS_DIR set (see docs/configuration.md).",
     )
 

@@ -1279,3 +1279,140 @@ async def test_choosing_an_installed_gpu_model_keeps_the_speaches_one(
 
     view = await service.view()
     assert (view.stt_gpu_model, view.stt_model) == (MEDIUM_Q5, WHISPER)
+
+
+async def test_download_a_gpu_model_and_use_it(
+    service: SpeechService, files: FakeFiles, installed: set[str]
+) -> None:
+    """The GPU server never lists its models, so no Speaches check applies to them."""
+    started = await service.download("whispercpp-medium-en-q5", activate=True)
+
+    assert _row(started, MEDIUM_Q5).state == "downloading"
+    assert (await service.view()).pending == [MEDIUM_Q5]
+    await files.finish()
+
+    view = await service.view()
+    assert (view.stt_gpu_model, view.stt_model, view.pending) == (MEDIUM_Q5, WHISPER, [])
+    assert (await service.models()).last_error is None
+    assert MEDIUM_Q5 in installed
+
+
+async def test_gpu_download_without_activate_leaves_the_choice(
+    service: SpeechService, files: FakeFiles
+) -> None:
+    await service.download("whispercpp-medium-en-q5", activate=False)
+    await files.finish()
+
+    view = await service.view()
+    assert (view.stt_gpu_model, view.stt_model) == (SMALL_Q8, WHISPER)
+    assert _row(await service.models(), MEDIUM_Q5).state == "installed"
+
+
+async def test_cancel_a_gpu_download(service: SpeechService, files: FakeFiles) -> None:
+    await service.download("whispercpp-medium-en-q5", activate=True)
+    await files.started()
+
+    await service.cancel_download("whispercpp-medium-en-q5")
+
+    models = await service.models()
+    assert _row(models, MEDIUM_Q5).state == "available"
+    assert (await service.view()).stt_gpu_model == SMALL_Q8
+
+
+@pytest.mark.parametrize("missing", ["files", "gpu_stt"])
+async def test_gpu_models_need_the_models_folder(
+    build: Callable[..., SpeechService], missing: str
+) -> None:
+    service = build(**{missing: None})
+
+    with pytest.raises(SpeechSettingsError) as refused:
+        await service.download("whispercpp-medium-en-q5", activate=True)
+
+    assert refused.value.status == 409
+    assert refused.value.message == (
+        "Models for whisper.cpp (GPU) can be downloaded and uninstalled only with "
+        "VT_SPEECH_MODELS_DIR set (see docs/configuration.md)."
+    )
+    assert (await service.models()).engines[1].manageable is False
+
+
+async def test_gpu_models_are_manageable_while_the_gpu_server_is_stopped(
+    service: SpeechService, gpu: FakeGpu, files: FakeFiles
+) -> None:
+    gpu.up = False
+
+    models = await service.models()
+    await service.download("whispercpp-medium-en-q5", activate=False)
+
+    assert models.engines[1] == SpeechEngineState(
+        engine="whispercpp", running=False, manageable=True
+    )
+    await files.finish()
+
+
+async def test_uninstall_a_gpu_model(
+    service: SpeechService,
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+    files: FakeFiles,
+    calls: list[str],
+    recognition: FakeServer,
+) -> None:
+    installed |= {MEDIUM_Q5, TURBO_Q5}
+    await service.save(speech_defaults.model_copy(update={"stt_gpu_model": TURBO_Q5}))
+    await service.download("whispercpp-base-en", activate=False)
+    refusals: dict[str, str] = {}
+
+    for key in ("whispercpp-small-en-q8", "whispercpp-large-v3-turbo-q5", "whispercpp-base-en"):
+        with pytest.raises(SpeechSettingsError) as refused:
+            await service.uninstall(key)
+        assert refused.value.status == 409
+        refusals[key] = refused.value.message
+
+    assert "is the default and stays installed." in refusals["whispercpp-small-en-q8"]
+    assert "is in use: choose another model first." in refusals["whispercpp-large-v3-turbo-q5"]
+    assert "cancel the download first" in refusals["whispercpp-base-en"]
+    assert calls == []
+
+    await service.uninstall("whispercpp-medium-en-q5")
+
+    assert calls == [f"delete {MEDIUM_Q5}"]  # no `unload`: Speaches never loaded it
+    await files.finish()
+
+
+async def test_uninstall_a_gpu_model_without_the_models_folder(
+    build: Callable[..., SpeechService],
+) -> None:
+    with pytest.raises(SpeechSettingsError) as refused:
+        await build(files=None).uninstall("whispercpp-medium-en-q5")
+
+    assert refused.value.status == 409
+    assert "only with VT_SPEECH_MODELS_DIR set" in refused.value.message
+
+
+async def test_choosing_a_speaches_model_does_not_touch_the_gpu_choice(
+    service: SpeechService, speech_defaults: SpeechSettings, installed: set[str]
+) -> None:
+    installed |= {SMALL, MEDIUM_Q5}
+    await service.save(speech_defaults.model_copy(update={"stt_gpu_model": MEDIUM_Q5}))
+
+    await service.download("whisper-small-en", activate=True)
+
+    view = await service.view()
+    assert (view.stt_model, view.stt_gpu_model) == (SMALL, MEDIUM_Q5)
+
+
+async def test_a_gpu_model_cannot_be_chosen_without_the_models_folder(
+    build: Callable[..., SpeechService], speech_defaults: SpeechSettings
+) -> None:
+    """The learner cannot download it either, so say what is missing."""
+    with pytest.raises(SpeechSettingsError) as refused:
+        await build(files=None).save(
+            speech_defaults.model_copy(update={"stt_gpu_model": MEDIUM_Q5})
+        )
+
+    assert refused.value.status == 422
+    assert refused.value.message == (
+        "whisper.cpp (GPU) needs VT_SPEECH_MODELS_DIR, the models folder it shares with the api "
+        "(see docs/configuration.md)."
+    )

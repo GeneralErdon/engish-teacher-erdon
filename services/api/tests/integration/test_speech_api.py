@@ -311,3 +311,15 @@ def test_the_preview_is_declared_as_binary_in_openapi() -> None:
     ok = app.openapi()["paths"]["/v1/speech/preview"]["post"]["responses"]["200"]
 
     assert "audio/wav" in ok["content"]
+
+
+async def test_a_gpu_model_downloads_with_202_and_the_selected_one_stays(
+    client: httpx2.AsyncClient,
+) -> None:
+    started = await client.post("/v1/speech/models/whispercpp-base-en/download", json={})
+
+    assert started.status_code == 202
+    models = SpeechModels.model_validate_json(started.content)
+    assert {m.key: m.state for m in models.models}["whispercpp-base-en"] == "downloading"
+    selected = await client.delete("/v1/speech/models/whispercpp-small-en-q8")
+    assert selected.status_code == 409
