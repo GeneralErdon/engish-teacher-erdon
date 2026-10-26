@@ -62,6 +62,10 @@ class FakeServer:
         self.error: ProviderError | None = None
         """Raised by every call but `unload`: the server does not answer."""
         self.unload_error: ProviderError | None = None
+        self.held: str | None = None
+        """A model whose `voices` call waits for `answer_held`, like a slow HTTP call."""
+        self.held_asked = asyncio.Event()
+        self.answer_held = asyncio.Event()
 
     async def is_speaches(self) -> bool:
         await asyncio.sleep(0)  # an HTTP call: other requests run meanwhile
@@ -74,6 +78,9 @@ class FakeServer:
 
     async def voices(self, model_id: str) -> list[Voice]:
         self._answer()
+        if model_id == self.held:
+            self.held_asked.set()
+            await self.answer_held.wait()
         return self.voices_of.get(model_id, [])
 
     async def unload(self, model_id: str) -> None:
@@ -135,10 +142,14 @@ class FakeFiles:
         assert self.task is not None
         return self.task
 
+    def release(self) -> None:
+        """Let the running download end."""
+        self._release.set()
+
     async def finish(self) -> asyncio.Task[Any]:
         """Let the download end, and wait until the service has acted on it."""
         task = await self.started()
-        self._release.set()
+        self.release()
         await asyncio.wait({task})
         return task
 
@@ -495,6 +506,38 @@ async def test_choosing_another_model_drops_the_pending_activation(
 
     assert (await service.view()).stt_model == TINY  # the latest choice wins
     assert _row(await service.models(), SMALL).state == "installed"
+
+
+@pytest.mark.parametrize(
+    ("change", "final"),
+    [
+        ({"tts_speed": 1.2}, (ALBA, "alba", 1.2)),  # the activation still applies, on top
+        ({"tts_model": KOKORO_INT8}, (KOKORO_INT8, "af_heart", 0.95)),  # the latest choice
+    ],
+)
+async def test_a_save_while_a_download_activates_is_kept(
+    service: SpeechService,
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+    voice_server: FakeServer,
+    files: FakeFiles,
+    change: dict[str, object],
+    final: tuple[str, str, float],
+) -> None:
+    """The learner saves while the activation asks Speaches for the new model's voices."""
+    installed.add(KOKORO_INT8)
+    voice_server.held = ALBA
+    await service.download("piper-alba", activate=True)
+    task = await files.started()
+    files.release()
+    await voice_server.held_asked.wait()
+
+    await service.save(speech_defaults.model_copy(update=change))
+    voice_server.answer_held.set()
+    await asyncio.wait({task})
+
+    view = await service.view()
+    assert (view.tts_model, view.tts_voice, view.tts_speed) == final
 
 
 async def test_cancel_drops_the_intent(service: SpeechService, files: FakeFiles) -> None:

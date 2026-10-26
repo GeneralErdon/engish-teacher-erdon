@@ -94,6 +94,8 @@ class SpeechService:
         self._defaults = defaults
         self._clock = clock
         self._download: _Download | None = None
+        self._settings_lock = asyncio.Lock()
+        """Held across each read-modify-write of the saved settings, so none overwrites another."""
         self._last_error: str | None = None
         self._measured: dict[str, _Measured] = {}
 
@@ -106,14 +108,15 @@ class SpeechService:
     async def save(self, settings: SpeechSettings) -> SpeechSettingsView:
         """Raises `SpeechSettingsError`: 422 for a model that is not installed or a voice the
         model does not have, 502 when the server cannot tell what is installed."""
-        for kind in _KINDS:
-            await self._check_installed(kind, _model(settings, kind))
-        voices = {voice.id for voice in await self.voices(settings.tts_model)}
-        if voices and settings.tts_voice not in voices:
-            raise SpeechSettingsError(
-                422, f"{settings.tts_model} has no voice {settings.tts_voice!r}."
-            )
-        await self._store(settings, await self._settings())
+        async with self._settings_lock:
+            for kind in _KINDS:
+                await self._check_installed(kind, _model(settings, kind))
+            voices = {voice.id for voice in await self.voices(settings.tts_model)}
+            if voices and settings.tts_voice not in voices:
+                raise SpeechSettingsError(
+                    422, f"{settings.tts_model} has no voice {settings.tts_voice!r}."
+                )
+            await self._store(settings, await self._settings())
         return self._view(settings, saved=True, missing=())
 
     async def models(self) -> SpeechModels:
@@ -289,8 +292,8 @@ class SpeechService:
             raise SpeechSettingsError(422, f"{model_id} is not installed: download it first.")
 
     async def _store(self, chosen: SpeechSettings, current: SpeechSettings) -> None:
-        """Save `chosen`. Changing a kind's model drops the activation of that kind's download:
-        the latest choice wins."""
+        """Save `chosen`, under `_settings_lock`. Changing a kind's model drops the activation of
+        that kind's download: the latest choice wins."""
         running = self._running()
         if running is not None:
             kind = running.entry.kind
@@ -298,17 +301,25 @@ class SpeechService:
                 running.activate = False
         await self._repository.save(chosen)
 
-    async def _select(self, entry: CatalogEntry) -> None:
-        """Make an installed model the active one. A voice model keeps the current voice if it
-        has it, else takes its first English voice (or keeps it when the server lists none)."""
-        current = await self._settings()
-        if entry.kind == "recognition":
-            chosen = current.model_copy(update={"stt_model": entry.model_id})
-        else:
-            voices = [voice.id for voice in await self.voices(entry.model_id)]
-            voice = voices[0] if voices and current.tts_voice not in voices else current.tts_voice
-            chosen = current.model_copy(update={"tts_model": entry.model_id, "tts_voice": voice})
-        await self._store(chosen, current)
+    async def _select(self, entry: CatalogEntry, download: _Download | None = None) -> None:
+        """Make an installed model the active one; for `download`, only if it still has its
+        activate intent, since a choice saved meanwhile wins. A voice model keeps the current
+        voice if it has it, else takes its first English voice (or keeps it when none is listed).
+        """
+        voices = [v.id for v in await self.voices(entry.model_id)] if entry.kind == "voice" else []
+        async with self._settings_lock:  # the settings as they are now, not before the voices
+            if download is not None and not download.activate:
+                return
+            current = await self._settings()
+            if entry.kind == "recognition":
+                chosen = current.model_copy(update={"stt_model": entry.model_id})
+            else:
+                keep = not voices or current.tts_voice in voices
+                voice = current.tts_voice if keep else voices[0]
+                chosen = current.model_copy(
+                    update={"tts_model": entry.model_id, "tts_voice": voice}
+                )
+            await self._store(chosen, current)
 
     async def _run(self, download: _Download, files: ModelFiles) -> None:
         """The background download. A failure ends up in `last_error`, never as an unretrieved
@@ -320,7 +331,7 @@ class SpeechService:
             if entry.model_id not in await self._servers[entry.kind].installed():
                 self._last_error = _NOT_SEEN_BY_SPEACHES
             elif download.activate:
-                await self._select(entry)
+                await self._select(entry, download)
         except (SpeechSettingsError, ProviderError) as error:
             logger.warning("Downloading %s failed: %s", entry.model_id, error.message)
             self._last_error = error.message
