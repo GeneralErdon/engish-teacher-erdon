@@ -483,6 +483,50 @@ async def test_a_long_turn_is_cut_not_lost(
     assert len(stt.heard[0]) == 44 + 32_000 * 30  # a WAV header, then exactly 30 s
 
 
+async def test_a_chunk_across_the_limit_is_trimmed_to_it(
+    session: ConversationSession,
+    saved_speech: SavedSpeech,
+    stt: FakeStt,
+    events: list[ServerEvent],
+) -> None:
+    saved_speech.saved = DEFAULTS.model_copy(update={"max_turn_s": 30})
+    await session.handle(SessionStart())
+    session.audio(bytes(32_000 * 29 + 16_000))  # 29.5 s
+    session.audio(bytes(32_000))  # 1 s, of which 0.5 s fits
+    await session.handle(InputCommit())
+    await _settle()
+
+    assert len(stt.heard[0]) == 44 + 32_000 * 30
+    assert _of(TranscriptFinal, events)[0].cut is True
+
+
+async def test_an_odd_sized_chunk_keeps_whole_samples(
+    session: ConversationSession, stt: FakeStt, events: list[ServerEvent]
+) -> None:
+    await session.handle(SessionStart())
+    session.audio(bytes(16_001))  # the last byte is half a sample
+    await session.handle(InputCommit())
+    await _settle()
+
+    assert len(stt.heard[0]) == 44 + 16_000
+    assert _of(TranscriptFinal, events)[0].cut is False
+
+
+async def test_audio_after_the_cut_is_ignored(
+    session: ConversationSession, saved_speech: SavedSpeech, stt: FakeStt
+) -> None:
+    saved_speech.saved = DEFAULTS.model_copy(update={"max_turn_s": 30})
+    await session.handle(SessionStart())
+    session.audio(bytes(32_000 * 29 + 16_000))
+    session.audio(bytes(32_000))  # cut at 30 s
+    session.audio(bytes(640))  # would fit if the buffer had room: it has none
+    session.audio(bytes(32_000 * 29))
+    await session.handle(InputCommit())
+    await _settle()
+
+    assert len(stt.heard[0]) == 44 + 32_000 * 30
+
+
 async def test_a_turn_within_the_limit_is_not_cut(
     session: ConversationSession, events: list[ServerEvent]
 ) -> None:
@@ -516,7 +560,8 @@ async def test_session_uses_the_chosen_voice(
     await session.handle(InputText(text="Hello"))
     await _settle()
 
-    assert tts.voices == [VoiceChoice("kokoro", "bf_emma", 1.2)] * len(tts.said) != []
+    assert tts.said
+    assert tts.voices == [VoiceChoice("kokoro", "bf_emma", 1.2)] * len(tts.said)
 
 
 async def test_missing_model_warns_at_start(

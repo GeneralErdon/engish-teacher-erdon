@@ -25,7 +25,7 @@ from vt_api.services.llm import LlmService
 from vt_api.services.speech import SpeechService
 from vt_api.teacher.conversation import correction_messages, reply_messages
 from vt_api.teacher.corrections import CorrectionParseError, parse_correction
-from vt_contracts.audio import OUTPUT_SAMPLE_RATE_HZ
+from vt_contracts.audio import INPUT_SAMPLE_RATE_HZ, OUTPUT_SAMPLE_RATE_HZ, SAMPLE_WIDTH_BYTES
 from vt_contracts.learner import LearnerProfile
 from vt_contracts.speech import SpeechKind
 from vt_contracts.ws import (
@@ -142,15 +142,16 @@ class ConversationSession:
     def audio(self, chunk: bytes) -> None:
         """Buffer microphone audio until `input.commit`, up to the longest turn; the rest is
         dropped and the turn is reported as cut."""
-        limit = (
+        limit_s = (
             self._started.speech.max_turn_s
             if self._started is not None
             else self._speech.default_max_turn_s
         )
-        if duration_s(len(self._audio) + len(chunk)) > limit:
+        room = int(limit_s * INPUT_SAMPLE_RATE_HZ) * SAMPLE_WIDTH_BYTES - len(self._audio)
+        if len(chunk) > room:
             self._audio_cut = True
-            return
-        self._audio.extend(chunk)
+        kept = max(min(len(chunk), room), 0)
+        self._audio.extend(chunk[: kept - kept % SAMPLE_WIDTH_BYTES])
 
     async def _commit_audio(self) -> None:
         pcm, cut = bytes(self._audio), self._audio_cut
