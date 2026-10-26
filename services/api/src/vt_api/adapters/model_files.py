@@ -8,9 +8,9 @@ would not free its space. Over plain HTTP every byte lands in the repo's `blobs/
 `*.incomplete` until the file is complete.
 
 `snapshot_download` records the revision (`refs/main`) before it fetches the files, so a download
-also marks the model's folder until the worker succeeds. `cleanup()` removes a marked or
-`.incomplete` folder only once nothing has written to it for `STALE_AFTER_S`: a model Speaches is
-downloading at that moment is left alone.
+also marks the model's folder until the worker succeeds. `cleanup()` removes a marked folder, or
+one with an unfinished blob, only once nothing has written to it for `STALE_AFTER_S`: a model
+Speaches is downloading at that moment is left alone.
 """
 
 import asyncio
@@ -221,8 +221,16 @@ def _bytes_on_disk(repo: Path) -> int:
 
 
 def _is_partial(repo: Path) -> bool:
-    """A blob is still being written, or a download of ours did not finish."""
-    return any((repo / "blobs").glob("*.incomplete")) or (repo / DOWNLOADING_MARKER).exists()
+    """A download of ours did not finish, or a blob was never finished.
+
+    An attempt writes `<etag>.<uuid8>.incomplete` (older versions `<etag>.incomplete`), so a
+    killed attempt can leave one beside the `<etag>` a later attempt finished: that model is
+    complete.
+    """
+    blobs = repo / "blobs"
+    return (repo / DOWNLOADING_MARKER).exists() or any(
+        not (blobs / part.name.split(".", 1)[0]).exists() for part in blobs.glob("*.incomplete")
+    )
 
 
 def _last_change(repo: Path) -> float:

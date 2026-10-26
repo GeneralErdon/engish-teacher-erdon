@@ -257,6 +257,16 @@ def test_cleanup_removes_half_written_repos_once_quiet(cache: Path) -> None:
     assert complete.exists()
 
 
+def test_cleanup_keeps_a_complete_repo_with_a_stray_incomplete(cache: Path) -> None:
+    # huggingface_hub names each attempt's temporary file uniquely: a killed attempt leaves
+    # one behind, beside the blob a later attempt finished.
+    stray = gone_quiet(make_repo(cache, "org/stray", blobs=("f00d", "f00d.1a2b3c4d.incomplete")))
+
+    HfModelFiles(cache)
+
+    assert stray.exists()
+
+
 def test_cleanup_keeps_a_download_still_being_written(cache: Path) -> None:
     preloading = make_repo(cache, "org/preloading", blobs=("beef.1a2b.incomplete",))  # Speaches
 
