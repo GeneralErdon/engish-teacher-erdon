@@ -42,17 +42,22 @@ export function ModelList({
   const selected = rows.find((model) => model.selected)
   const error = [actions.download, actions.cancel, actions.uninstall].find((m) => m.isError)?.error
 
+  // A model that is not installed is only proposed: arrowing over rows must not start downloads.
+  const [proposed, setProposed] = useState<string | null>(null)
+  const proposal = rows.find((model) => model.key === proposed && model.state === 'available')
+
   const choose = (model: Model) => {
-    if (model.state === 'installed') onUse(model)
-    else if (manageable)
-      actions.download.mutate({ params: { path: { key: model.key } }, body: { activate: true } })
+    if (model.state === 'installed') {
+      setProposed(null)
+      onUse(model)
+    } else if (manageable) setProposed(model.key)
   }
 
   return (
     <div className="flex flex-col gap-2">
       <RadioGroupPrimitive.Root
         aria-label={label}
-        value={selected?.key ?? ''}
+        value={proposal?.key ?? selected?.key ?? ''}
         onValueChange={(key) => {
           const model = rows.find((row) => row.key === key)
           if (model) choose(model)
@@ -67,6 +72,10 @@ export function ModelList({
             pending={pending.includes(model.model_id)}
             actions={actions}
             onUse={onUse}
+            proposed={proposal?.key === model.key}
+            onDismiss={() => {
+              setProposed(null)
+            }}
           />
         ))}
       </RadioGroupPrimitive.Root>
@@ -91,12 +100,17 @@ function ModelRow({
   pending,
   actions,
   onUse,
+  proposed,
+  onDismiss,
 }: {
   model: Model
   manageable: boolean
   pending: boolean
   actions: ReturnType<typeof useModelActions>
   onUse: (model: Model) => void
+  /** The row is picked but not yet confirmed for download. */
+  proposed: boolean
+  onDismiss: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
   const key = { params: { path: { key: model.key } } }
@@ -157,7 +171,7 @@ function ModelRow({
               Use
             </Button>
           )}
-          {!installed && !downloading && manageable && (
+          {!installed && !downloading && manageable && !proposed && (
             <Button
               size="sm"
               variant="outline"
@@ -193,6 +207,24 @@ function ModelRow({
           )}
         </div>
       </div>
+      {proposed && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span>Download {model.approx_mb} MB and use it?</span>
+          <Button
+            size="xs"
+            disabled={actions.download.isPending}
+            onClick={() => {
+              actions.download.mutate({ ...key, body: { activate: true } })
+              onDismiss()
+            }}
+          >
+            Download
+          </Button>
+          <Button size="xs" variant="outline" onClick={onDismiss}>
+            Cancel
+          </Button>
+        </div>
+      )}
       {downloading && <Progress label={model.label} progress={model.download} />}
       {confirming && (
         <div className="flex flex-wrap items-center gap-2 text-xs">

@@ -79,6 +79,10 @@ describe('Speech recognition models', () => {
     const list = await recognition()
 
     await user.click(within(list).getByRole('radio', { name: 'Whisper tiny (English)' }))
+    const tiny = row(list, 'Whisper tiny (English)')
+    expect(api.sent.has('POST /v1/speech/models/whisper-tiny-en/download')).toBe(false)
+    expect(tiny.getByText('Download 75 MB and use it?')).toBeInTheDocument()
+    await user.click(tiny.getByRole('button', { name: 'Download' }))
 
     expect(api.sent.get('POST /v1/speech/models/whisper-tiny-en/download')).toEqual([
       { activate: true },
@@ -97,6 +101,46 @@ describe('Speech recognition models', () => {
     await waitFor(() => {
       expect(screen.queryByText(/Will be used when/)).not.toBeInTheDocument()
     })
+  })
+
+  it('arrowing over rows starts no download', async () => {
+    const { user, api } = renderApp('/settings')
+    const list = await recognition()
+    within(list).getByRole('radio', { name: 'Whisper small (English)' }).focus()
+
+    // Radix selects the row that arrow focus lands on, but only while the key is held down.
+    await user.keyboard('{ArrowDown>}')
+    await waitFor(() => {
+      expect(within(list).getByRole('radio', { name: 'Whisper base' })).toBeChecked()
+    })
+    await user.keyboard('{/ArrowDown}{ArrowDown>}')
+
+    expect(await screen.findByText('Download 75 MB and use it?')).toBeInTheDocument()
+    await user.keyboard('{/ArrowDown}')
+    expect([...api.sent.keys()].filter((route) => route.startsWith('POST'))).toEqual([])
+    expect(within(list).getByRole('radio', { name: 'Whisper tiny (English)' })).toBeChecked()
+  })
+
+  it('cancelling the proposal sends nothing and restores the model in use', async () => {
+    const { user, api } = renderApp('/settings')
+    const list = await recognition()
+    await user.click(within(list).getByRole('radio', { name: 'Whisper tiny (English)' }))
+
+    await user.click(row(list, 'Whisper tiny (English)').getByRole('button', { name: 'Cancel' }))
+
+    expect(api.sent.size).toBe(0)
+    expect(within(list).getByRole('radio', { name: 'Whisper small (English)' })).toBeChecked()
+    expect(screen.queryByText(/and use it\?/)).not.toBeInTheDocument()
+  })
+
+  it('picking an installed model dismisses a proposal', async () => {
+    const { user } = renderApp('/settings')
+    const list = await recognition()
+    await user.click(within(list).getByRole('radio', { name: 'Whisper tiny (English)' }))
+
+    await user.click(within(list).getByRole('radio', { name: 'Whisper base' }))
+
+    expect(screen.queryByText(/and use it\?/)).not.toBeInTheDocument()
   })
 
   it('downloads without using the model when asked with the button', async () => {
@@ -213,6 +257,7 @@ describe('Speech recognition models', () => {
     )
 
     await user.click(within(list).getByRole('radio', { name: 'Whisper tiny (English)' }))
+    await user.click(row(list, 'Whisper tiny (English)').getByRole('button', { name: 'Download' }))
 
     expect(await screen.findByText('Another download is running.')).toBeInTheDocument()
   })
