@@ -1,6 +1,6 @@
 # Speech engines: CPU or GPU (Vulkan) speech recognition, chosen in the UI
 
-Status: approved in conversation on 2026-10-26 ("adelante el selector de motor, … vulkan para las GPU, el NPU puede ir después"), pending review of this document. One pull request into `develop`, on its own branch (`feat/speech-engines`), containing this document and the implementation.
+Status: approved on 2026-10-26, in conversation ("adelante el selector de motor, … vulkan para las GPU, el NPU puede ir después"), and the design summary below ("si asi vamos bien"). One pull request into `develop`, on its own branch (`feat/speech-engines`), containing this document and the implementation.
 
 ## Why
 
