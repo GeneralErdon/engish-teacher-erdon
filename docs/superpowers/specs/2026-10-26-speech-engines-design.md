@@ -98,7 +98,7 @@ Pin the whisper.cpp image by a `main-vulkan-<sha>` tag (with its digest) that is
 - `for_session()` resolves the engine:
   - If the saved engine is `whispercpp` and its server answers, the session uses the GPU model.
   - Otherwise it uses Speaches with `stt_model` (falling back to its default, as now). A new warning, `speech_engine_unavailable`, works like `speech_model_missing`: retryable, its message names the engine and says how to start it.
-- **The GPU model is loaded when the conversation starts.** `for_session()` asks the whisper.cpp server to have the chosen model loaded (`/load` when it differs).
+- **The GPU model is loaded when the conversation starts.** `for_session()` always asks the whisper.cpp server to load the chosen model (`/load`), because no route reports the loaded model: a server restarted since the last conversation holds its startup model again.
   - The server exits if `/load` cannot open a model (read in its source; for example, not enough GPU memory). Loading at the start catches that before the learner speaks, and the session falls back to Speaches with the warning.
 - **Mid-conversation fallback.** If the GPU server becomes unreachable during a conversation (a connection error or refusal, not an HTTP error answer), that turn is transcribed by Speaches instead.
   - The session stays on Speaches until the conversation ends; the GPU is not tried again on every turn.
@@ -106,7 +106,7 @@ Pin the whisper.cpp image by a `main-vulkan-<sha>` tag (with its digest) that is
   - The GPU client uses a short connect timeout (a few seconds), so a dead server fails fast. A server that accepts the connection but answers with an error or hangs past the transcription timeout stays `stt_failed`, as today.
 - **A whisper.cpp adapter, with the `SpeechToText` port unchanged:**
   - It transcribes through `/v1/audio/transcriptions`, with the same WAV and `language=en`. It may reuse the OpenAI adapter if the server's JSON matches; otherwise it is a small dedicated adapter. Verify the response shape in the server source.
-  - Before a transcription with a model other than the loaded one, it calls `/load`. Loads are serialised with a lock, and the adapter tracks the loaded model.
+  - A transcription calls `/load` first only when its model differs from the one the adapter last loaded (a conversation start always loads, above). Loads and transcriptions are serialised with a lock, and the adapter tracks the loaded model.
   - A failed load is a `ProviderError`, so the turn reports `stt_failed`.
 - **Measured speed** stays keyed by model id. The ids are distinct per engine, so the turn-length estimate follows the engine automatically.
 - **Status** (`/v1/speech/status`) reports the recognition engine in use and its model.

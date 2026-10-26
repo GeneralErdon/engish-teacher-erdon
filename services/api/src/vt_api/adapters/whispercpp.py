@@ -2,10 +2,17 @@
 --inference-path /audio/transcriptions`), which holds one model in GPU memory at a time.
 
 `POST /load` swaps the model; loads and inference share one mutex on the server, so the adapter
-serialises them too. A model file that exists but does not load makes the server process exit,
-which drops the connection, so a failed load always forgets the loaded model. Written against
-`httpx2` rather than the openai SDK: only the transport tells a refused connection (the server
-is not running) from a read timeout (it is slow).
+serialises them too, and one lock spans a transcription and the load before it. No route says
+which model the server holds, and a restart (`docker compose restart`, a crash) brings back its
+startup model, so `load`, called when a conversation starts, always asks the server; a
+transcription loads only when its model differs from the last one loaded. A restart the adapter
+never sees, between two turns of one conversation, still transcribes with the startup model
+until a request fails.
+
+A model file that exists but does not load makes the server process exit, which drops the
+connection, so a failed load always forgets the loaded model. Written against `httpx2` rather
+than the openai SDK: only the transport tells a refused connection (the server is not running)
+from a read timeout (it is slow).
 """
 
 import asyncio
@@ -34,7 +41,8 @@ class WhisperCppSpeechToText:
 
     async def transcribe(self, wav: bytes, model: str, timeout_s: float) -> str:
         async with self._lock:
-            await self._ensure_loaded(model)
+            if model != self._loaded:
+                await self._load(model)
             response = await self._send(
                 "/audio/transcriptions",
                 timeout_s,
@@ -59,8 +67,9 @@ class WhisperCppSpeechToText:
         return response.status_code in (200, 503)
 
     async def load(self, model: str) -> None:
+        """Always asks the server, even for the model last loaded (see the module docstring)."""
         async with self._lock:
-            await self._ensure_loaded(model)
+            await self._load(model)
 
     async def status(self, model: str) -> ModelStatus:
         """Never raises. whisper.cpp cannot say which model it holds, so `model_ready` only
@@ -88,10 +97,8 @@ class WhisperCppSpeechToText:
             update={"detail": from_status(response.status_code, response.text).message}
         )
 
-    async def _ensure_loaded(self, model: str) -> None:
+    async def _load(self, model: str) -> None:
         """Called with the lock held."""
-        if model == self._loaded:
-            return
         self._loaded = None
         await self._send(
             "/load",

@@ -99,11 +99,36 @@ async def test_transcribe_loads_a_different_model_first(
     assert b"/models/models--g--w/snapshots/r/b.bin" in fake.requests[3].content
 
 
-async def test_load_is_skipped_when_already_loaded(fake: Fake, stt: WhisperCppSpeechToText) -> None:
+async def test_load_always_asks_the_server(fake: Fake, stt: WhisperCppSpeechToText) -> None:
+    """No route says which model the server holds, and it may have restarted with its startup
+    model since: a conversation start always loads."""
     await stt.load(MODEL_A)
     await stt.load(MODEL_A)
 
-    assert fake.paths() == ["/v1/load"]
+    assert fake.paths() == ["/v1/load", "/v1/load"]
+    assert all(b"/models/models--g--w/snapshots/r/a.bin" in r.content for r in fake.requests)
+
+
+async def test_transcribe_right_after_load_does_not_load_again(
+    fake: Fake, stt: WhisperCppSpeechToText
+) -> None:
+    await stt.load(MODEL_A)
+    await stt.transcribe(b"w", MODEL_A, 30)
+
+    assert fake.paths() == ["/v1/load", "/v1/audio/transcriptions"]
+
+
+async def test_a_load_waits_for_a_transcription_and_its_load(
+    fake: Fake, stt: WhisperCppSpeechToText
+) -> None:
+    fake.delay_s = 0.01
+
+    await asyncio.gather(stt.transcribe(b"w", MODEL_A, 30), stt.load(MODEL_B))
+
+    assert fake.paths() == ["/v1/load", "/v1/audio/transcriptions", "/v1/load"]
+    assert b"/models/models--g--w/snapshots/r/a.bin" in fake.requests[0].content
+    assert b"/models/models--g--w/snapshots/r/b.bin" in fake.requests[2].content
+    assert fake.max_active == 1
 
 
 async def test_concurrent_loads_are_serialised(fake: Fake, stt: WhisperCppSpeechToText) -> None:
@@ -125,8 +150,8 @@ async def test_failed_load_forgets_the_loaded_model(
     assert not isinstance(refused.value, EngineUnreachable)
 
     fake.handler = _ok
-    await stt.load(MODEL_A)  # forgotten: loaded again
-    assert fake.paths() == ["/v1/load"] * 3
+    await stt.transcribe(b"w", MODEL_A, 30)  # forgotten: loaded again
+    assert fake.paths() == ["/v1/load"] * 3 + ["/v1/audio/transcriptions"]
 
     fake.handler = _raising(httpx2.RemoteProtocolError("dropped", request=_request()))
     with pytest.raises(ProviderError) as dropped:
@@ -134,8 +159,8 @@ async def test_failed_load_forgets_the_loaded_model(
     assert not isinstance(dropped.value, EngineUnreachable)
 
     fake.handler = _ok
-    await stt.load(MODEL_B)
-    assert fake.paths() == ["/v1/load"] * 5
+    await stt.transcribe(b"w", MODEL_A, 30)  # forgotten: loaded again
+    assert fake.paths()[4:] == ["/v1/load", "/v1/load", "/v1/audio/transcriptions"]
 
 
 @pytest.mark.parametrize("error_type", [httpx2.ConnectError, httpx2.ConnectTimeout])
@@ -164,8 +189,8 @@ async def test_unreachable_forgets_the_loaded_model(
         await stt.transcribe(b"w", MODEL_A, 30)
 
     fake.handler = _ok
-    await stt.load(MODEL_A)
-    assert fake.paths().count("/v1/load") == 2
+    await stt.transcribe(b"w", MODEL_A, 30)
+    assert fake.paths() == ["/v1/load", "/v1/audio/transcriptions"] * 2
 
 
 async def test_read_timeout_and_http_errors_are_not_unreachable(

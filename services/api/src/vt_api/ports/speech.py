@@ -29,8 +29,9 @@ class GpuSpeechToText(SpeechToText, Protocol):
         ...
 
     async def load(self, model: str) -> None:
-        """Make the server hold `model`; fine if it already does. Raises `ProviderError`, and
-        `EngineUnreachable` when the server is not running."""
+        """Make the server load `model`, always: no route says which model it holds, and a
+        restart brings back its startup model. Called when a conversation starts. Raises
+        `ProviderError`, and `EngineUnreachable` when the server is not running."""
         ...
 
 
