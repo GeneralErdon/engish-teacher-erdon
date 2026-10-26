@@ -1286,6 +1286,61 @@ async def test_only_a_changed_engine_is_checked(
     assert (await service.models()).engines[1].running is False
 
 
+BASE_EN = "ggerganov/whisper.cpp/ggml-base.en.bin"
+
+
+async def test_a_row_saved_before_the_gpu_engine_uses_the_configured_gpu_model(
+    build: Callable[..., SpeechService],
+    database: Database,
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+) -> None:
+    """Migration 0003 leaves a row saved before it with no GPU choice (`""`): wherever the
+    saved settings are read, the configured default (`VT_STT_GPU_MODEL`) stands in."""
+    installed.add(BASE_EN)
+    service = build(defaults=speech_defaults.model_copy(update={"stt_gpu_model": BASE_EN}))
+    await SqlSpeechSettingsRepository(database).save(
+        speech_defaults.model_copy(update={"stt_gpu_model": "", "tts_speed": 1.1})
+    )
+
+    view = await service.view()
+    assert (view.stt_gpu_model, view.tts_speed, view.source, view.missing) == (
+        BASE_EN,
+        1.1,
+        "saved",
+        [],
+    )
+    assert [m.model_id for m in (await service.models()).models if m.selected] == [
+        WHISPER,
+        BASE_EN,
+        KOKORO,
+    ]
+
+    shown = SpeechSettings.model_validate(view.model_dump(exclude={"source", "missing", "pending"}))
+    saved = await service.save(shown.model_copy(update={"tts_speed": 1.2}))  # as the UI does
+
+    assert (saved.stt_gpu_model, saved.tts_speed) == (BASE_EN, 1.2)
+
+
+async def test_a_conversation_on_a_row_without_a_gpu_choice_uses_the_configured_model(
+    build: Callable[..., SpeechService],
+    database: Database,
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+    gpu: FakeGpu,
+) -> None:
+    installed.add(BASE_EN)
+    service = build(defaults=speech_defaults.model_copy(update={"stt_gpu_model": BASE_EN}))
+    await SqlSpeechSettingsRepository(database).save(
+        speech_defaults.model_copy(update={"stt_engine": "whispercpp", "stt_gpu_model": ""})
+    )
+
+    session = await service.for_session()
+
+    assert session.recognition == Recognition("whispercpp", BASE_EN, f"snapshots/{BASE_EN}")
+    assert session.missing == ()  # nothing was chosen, so nothing is missing
+
+
 async def test_choosing_an_installed_gpu_model_keeps_the_speaches_one(
     service: SpeechService, installed: set[str]
 ) -> None:

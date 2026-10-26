@@ -278,8 +278,9 @@ async def test_speech_settings_round_trip(database: Database) -> None:
 async def test_speech_settings_saved_before_the_engine_choice_use_speaches(
     database: Database,
 ) -> None:
-    """Migration 0003 gives a row saved before it Speaches and the default GPU model; going
-    back down drops both columns."""
+    """Migration 0003 gives a row saved before it Speaches and no GPU choice (`""`, which the
+    service reads as `VT_STT_GPU_MODEL`); going back down drops both columns, and up again
+    works."""
     with database.engine.begin() as connection:
         command.downgrade(_alembic(connection), "0002")
         columns = [row[1] for row in connection.execute(text("PRAGMA table_info(speech_settings)"))]
@@ -297,13 +298,18 @@ async def test_speech_settings_saved_before_the_engine_choice_use_speaches(
 
     saved = await SqlSpeechSettingsRepository(database).load()
     assert saved is not None
-    assert (saved.stt_engine, saved.stt_gpu_model) == ("openai", DEFAULT_GPU_MODEL)
+    assert (saved.stt_engine, saved.stt_gpu_model) == ("openai", "")
     assert saved == _speech_settings(
         stt_model="Systran/faster-whisper-small.en",
+        stt_gpu_model="",
         tts_voice="am_adam",
         tts_speed=1.1,
         max_turn_s=180,
     )
+    with database.engine.begin() as connection:  # down and up again, with the row in it
+        command.downgrade(_alembic(connection), "0002")
+    migrate(database.engine)
+    assert await SqlSpeechSettingsRepository(database).load() == saved
 
 
 async def test_unreadable_speech_settings_fall_back(

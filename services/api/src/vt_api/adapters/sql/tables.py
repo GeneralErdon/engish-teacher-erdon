@@ -77,11 +77,10 @@ class SpeechSettingsRow(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     stt_model: Mapped[str] = mapped_column(String(200))
-    # A row saved before the engine choice reads back as Speaches, with the default GPU model.
+    # A row saved before the engine choice reads back as Speaches, with no GPU model chosen
+    # yet (""): the speech service reads that as the configured one (`VT_STT_GPU_MODEL`).
     stt_engine: Mapped[str] = mapped_column(String(20), server_default="openai")
-    stt_gpu_model: Mapped[str] = mapped_column(
-        String(200), server_default="ggerganov/whisper.cpp/ggml-small.en-q8_0.bin"
-    )
+    stt_gpu_model: Mapped[str] = mapped_column(String(200), server_default="")
     tts_model: Mapped[str] = mapped_column(String(200))
     tts_voice: Mapped[str] = mapped_column(String(100))
     tts_speed: Mapped[float] = mapped_column(Float)

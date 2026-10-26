@@ -15,19 +15,14 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
-    # A row saved before reads back as Speaches, the only engine there was, with the default
-    # whisper.cpp model.
+    # A row saved before reads back as Speaches, the only engine there was, with no whisper.cpp
+    # model chosen yet (""): the api reads that as the configured one, `VT_STT_GPU_MODEL`.
     with op.batch_alter_table("speech_settings") as batch:
         batch.add_column(
             sa.Column("stt_engine", sa.String(length=20), server_default="openai", nullable=False)
         )
         batch.add_column(
-            sa.Column(
-                "stt_gpu_model",
-                sa.String(length=200),
-                server_default="ggerganov/whisper.cpp/ggml-small.en-q8_0.bin",
-                nullable=False,
-            )
+            sa.Column("stt_gpu_model", sa.String(length=200), server_default="", nullable=False)
         )
 
 

@@ -177,7 +177,7 @@ class SpeechService:
         return self._defaults.max_turn_s
 
     async def view(self) -> SpeechSettingsView:
-        saved = await self._repository.load()
+        saved = await self._saved()
         settings = saved or self._defaults
         missing = (await self._session(settings, load=False)).missing
         return self._view(settings, saved=saved is not None, missing=missing)
@@ -353,7 +353,16 @@ class SpeechService:
         await self._stop()
 
     async def _settings(self) -> SpeechSettings:
-        return await self._repository.load() or self._defaults
+        return await self._saved() or self._defaults
+
+    async def _saved(self) -> SpeechSettings | None:
+        """The saved settings, read only here. A row saved before the GPU engine has no GPU
+        model chosen (`""`): the configured one (`VT_STT_GPU_MODEL`) stands in, so neither the
+        UI nor a conversation ever sees `""`."""
+        saved = await self._repository.load()
+        if saved is not None and not saved.stt_gpu_model:
+            return saved.model_copy(update={"stt_gpu_model": self._defaults.stt_gpu_model})
+        return saved
 
     def _view(
         self, settings: SpeechSettings, *, saved: bool, missing: tuple[SpeechKind, ...]
