@@ -26,7 +26,7 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_TTS_VOICE` | str | `af_heart` | Default voice until you save one in Settings → Voice. Tutor voice: American (`af_*`, `am_*`) or British (`bf_*`, `bm_*`) English, e.g. `am_michael`, `bf_emma` |
 | `VT_TTS_SPEED` | float 0.7–1.3 | `0.95` | Default speaking speed until you save one in Settings → Voice. Slightly slower helps learners |
 | `VT_MAX_TURN_S` | int 30–300 | `120` | Longest spoken turn, in seconds. Settings → Voice offers 30 s, 1, 2, 3 and 5 min |
-| `VT_SPEECH_MODELS_DIR` | existing directory | unset | The Hugging Face cache folder shared with Speaches. Set, Settings → Voice downloads and removes models there; unset, the model lists are read-only. Docker Compose sets `/data/models`; on Linux `just dev-api` sets `data/models` (not on Windows or macOS, where the Speaches container would not share file ownership with your user). On Linux the Speaches container writes there as uid 1000, so the folder must be writable by that user (it is when a uid-1000 user cloned the repository) |
+| `VT_SPEECH_MODELS_DIR` | directory (the api creates it) | unset | The Hugging Face cache folder shared with Speaches. Set, Settings → Voice downloads and removes models there; unset, the model lists are read-only. Docker Compose sets `/data/models`; on Linux `just dev-api` sets `data/models` (not on Windows or macOS, where the Speaches container would not share file ownership with your user). On Linux the Speaches container writes there as uid 1000, so the folder must be writable by that user (it is when a uid-1000 user cloned the repository) |
 | `VT_PRON_BASE_URL` | URL | `http://pron:8001` | Pronunciation service |
 | `VT_LEARNER_L1` | ISO 639 code | `es` | Learner's native language (explanations and typical errors) |
 | `VT_LEARNER_LEVEL` | `A1…C2` | `B1` | Starting level. Changeable in the app (**Settings → Learning**), which wins |
@@ -70,7 +70,7 @@ It starts Speaches on `127.0.0.1:8000` and returns once it is healthy. Compose p
 
 On a Speaches you run yourself, download a model with `SPEACHES_BASE_URL=http://localhost:8000 uvx speaches-cli model download <model id>`.
 
-**One-time re-download.** The models used to live in the `stt-models` Docker volume. They now live in `./data/models`, a folder the api and Speaches share, so the ~700 MB of defaults are downloaded again once on the first start. Then remove the old volume: `docker volume rm <project>_stt-models`, where `<project>` is the Compose project name (usually the folder name, e.g. `voice-tutor_stt-models`; `docker volume ls` lists it).
+**One-time re-download.** The models used to live in the `stt-models` Docker volume. They now live in `./data/models`, a folder the api and Speaches share, so the ~700 MB of defaults are downloaded again once on the first start. Then remove the old volume: `docker volume rm voice-tutor_stt-models` (`compose.yaml` names the project `voice-tutor`, whatever the folder is called).
 
 **Settings → Voice** in the app checks each part (`GET /v1/speech/status`) and says what to run.
 

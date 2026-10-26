@@ -243,15 +243,17 @@ All settings live in `.env`, starting from [`.env.example`](.env.example). They 
 | `VT_LLM_API_KEY` | *(empty)* | For providers that need one. Keys saved in the app stay in the backend, [encrypted](docs/configuration.md#encryption) (SQLCipher + AES-256-GCM, master key in the OS keyring). |
 | `VT_LLM_HF_REPO` | `ggml-org/gemma-3-4b-it-GGUF` | GGUF that llama.cpp downloads (`cpu` / `amd` profiles). |
 | `VT_STT_BASE_URL` | `http://stt:8000/v1` | Speech-to-text endpoint. |
-| `VT_STT_MODEL` | `Systran/faster-distil-whisper-small.en` | Speaches model id, downloaded once ([voice setup](docs/configuration.md#voice-setup)). |
+| `VT_STT_MODEL` | `Systran/faster-distil-whisper-small.en` | Default speech-recognition model: a Speaches model id, downloaded once ([voice setup](docs/configuration.md#voice-setup)). |
 | `VT_TTS_BASE_URL` | `http://tts:8000/v1` | Text-to-speech endpoint (the same Speaches). |
-| `VT_TTS_MODEL` | `speaches-ai/Kokoro-82M-v1.0-ONNX` | The tutor's voice, downloaded once ([voice setup](docs/configuration.md#voice-setup)). |
-| `VT_TTS_VOICE` | `af_heart` | Tutor voice (American or British English). |
-| `VT_MAX_TURN_S` | `120` | Longest spoken turn in seconds (30–300). |
+| `VT_TTS_MODEL` | `speaches-ai/Kokoro-82M-v1.0-ONNX` | Default model for the tutor's voice, downloaded once ([voice setup](docs/configuration.md#voice-setup)). |
+| `VT_TTS_VOICE` | `af_heart` | Default tutor voice (American or British English). |
+| `VT_MAX_TURN_S` | `120` | Default longest spoken turn, in seconds (30–300). |
 | `VT_PRON_BASE_URL` | `http://pron:8001` | Pronunciation scoring service. |
 | `VT_NOTES_DIR` | `/data/notes` | Where session notes are written (mount it into your Obsidian vault if you like). |
 
-The speech models, the tutor's voice and speed, and the turn length are easier to set in the app under **Settings → Voice**, which wins over the `VT_STT_*`, `VT_TTS_*` and `VT_MAX_TURN_S` variables. Downloads happen on the server and are stored in `data/models`, shared with Speaches ([details](docs/configuration.md#voice-setup)).
+The speech models, the tutor's voice and speed, and the turn length are easier to set in the app under **Settings → Voice**, which wins over `VT_STT_MODEL`, `VT_TTS_MODEL`, `VT_TTS_VOICE`, `VT_TTS_SPEED` and `VT_MAX_TURN_S`. Downloads happen on the server and are stored in `data/models`, shared with Speaches ([details](docs/configuration.md#voice-setup)).
+
+**Upgrading from v0.1.0:** the speech models moved from the `stt-models` Docker volume to `data/models`, so the first start after upgrading downloads the ~700 MB of defaults again. Then remove the old volume with `docker volume rm voice-tutor_stt-models`.
 
 The full reference, including the `pron` service and Docker-only variables, is in [docs/configuration.md](docs/configuration.md).
 
