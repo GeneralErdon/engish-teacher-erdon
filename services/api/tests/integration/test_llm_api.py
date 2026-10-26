@@ -22,6 +22,7 @@ from vt_api.domain.speech import SessionSpeech, VoiceChoice
 from vt_api.main import create_app
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
+from vt_api.services.speech import SpeechService
 from vt_contracts.llm import (
     ConnectionTestResult,
     LlmSettingsView,
@@ -81,6 +82,7 @@ def container(
         stt=create_autospec(OpenAISpeechToText, instance=True),
         tts=create_autospec(OpenAITextToSpeech, instance=True),
         session_speech=SessionSpeech("whisper", VoiceChoice("kokoro", "af_heart", 1.0), 120),
+        speech=create_autospec(SpeechService, instance=True),
     )
 
 

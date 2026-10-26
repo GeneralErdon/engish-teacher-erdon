@@ -14,6 +14,7 @@ from vt_api.domain.speech import SessionSpeech, VoiceChoice
 from vt_api.main import create_app
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
+from vt_api.services.speech import SpeechService
 from vt_contracts.learner import LearnerProfileView
 
 
@@ -25,6 +26,7 @@ async def client(learner_service: LearnerService) -> AsyncIterator[httpx2.AsyncC
         stt=create_autospec(OpenAISpeechToText, instance=True),
         tts=create_autospec(OpenAITextToSpeech, instance=True),
         session_speech=SessionSpeech("whisper", VoiceChoice("kokoro", "af_heart", 1.0), 120),
+        speech=create_autospec(SpeechService, instance=True),
     )
     app = create_app(Settings(_env_file=None), container=container)
     async with httpx2.AsyncClient(

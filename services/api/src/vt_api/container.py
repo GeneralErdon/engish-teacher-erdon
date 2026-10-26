@@ -7,23 +7,29 @@ from dataclasses import dataclass
 
 import anthropic
 import anyio
+import httpx2
 import openai
 from pydantic import HttpUrl
 
 from vt_api.adapters.chat_factory import SdkChatModelFactory
+from vt_api.adapters.model_files import HfModelFiles
 from vt_api.adapters.openai_stt import OpenAISpeechToText
 from vt_api.adapters.openai_tts import OpenAITextToSpeech
 from vt_api.adapters.secret_key import MasterKey, load_master_key, usable_keyring
+from vt_api.adapters.speaches import SpeachesServer
 from vt_api.adapters.sql.database import Database, open_database
 from vt_api.adapters.sql.learner_profile import SqlLearnerProfileRepository
 from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
+from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
 from vt_api.config import Settings
 from vt_api.domain.llm import environment_config
 from vt_api.domain.speech import SessionSpeech, VoiceChoice, entry_for
 from vt_api.ports.speech import SpeechToText, TextToSpeech
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
+from vt_api.services.speech import SpeechService
 from vt_contracts.learner import LearnerProfile
+from vt_contracts.speech import SpeechSettings
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +46,7 @@ class Container:
     tts: TextToSpeech
     session_speech: SessionSpeech
     """What a conversation uses, from the settings; the saved choice replaces it later."""
+    speech: SpeechService
 
 
 def _open_database(settings: Settings) -> Database:
@@ -94,6 +101,30 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
             ),
             max_turn_s=settings.max_turn_s,
         )
+        speaches_http = httpx2.AsyncClient(timeout=TTS_TIMEOUT_S)
+        stack.push_async_callback(speaches_http.aclose)
+        files = (
+            await anyio.to_thread.run_sync(HfModelFiles, settings.speech_models_dir)
+            if settings.speech_models_dir is not None
+            else None
+        )
+        speech = SpeechService(
+            repository=SqlSpeechSettingsRepository(database),
+            stt=stt,
+            tts=tts,
+            recognition_server=SpeachesServer(speaches_http, str(settings.stt_base_url)),
+            voice_server=SpeachesServer(speaches_http, str(settings.tts_base_url)),
+            files=files,
+            defaults=SpeechSettings(
+                stt_model=settings.stt_model,
+                tts_model=settings.tts_model,
+                tts_voice=settings.tts_voice,
+                tts_speed=settings.tts_speed,
+                max_turn_s=settings.max_turn_s,
+            ),
+        )
+        # Pushed last, so it runs first: a running download stops before the clients close.
+        stack.push_async_callback(speech.aclose)
         environment = environment_config(
             kind=settings.llm_provider,
             base_url=str(settings.llm_base_url),
@@ -116,4 +147,5 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
             stt=stt,
             tts=tts,
             session_speech=session_speech,
+            speech=speech,
         )
