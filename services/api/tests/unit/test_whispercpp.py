@@ -51,6 +51,24 @@ def _raising(error: Exception) -> Handler:
     return handler
 
 
+def _raise(error: Exception) -> httpx2.Response:
+    raise error
+
+
+def _failing_once(error: Exception) -> Handler:
+    """Raises `error` for the first request, then answers like a healthy server."""
+    failed = False
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise error
+        return _ok(request)
+
+    return handler
+
+
 @pytest.fixture
 def fake() -> Fake:
     return Fake()
@@ -79,6 +97,29 @@ async def test_transcribe_posts_the_wav_and_strips_the_text(
     assert b"RIFFdata" in body
     assert b'name="response_format"\r\n\r\njson\r\n' in body
     assert b'name="language"\r\n\r\nen\r\n' in body
+
+
+@pytest.mark.parametrize(
+    ("said", "text"),
+    [
+        ("[BLANK_AUDIO]", ""),
+        (" [ Silence ]\n", ""),
+        ("(music) ♪", ""),
+        (" [MUSIC] (applause) ♫ ♬\n", ""),
+        ("Hello [laughs]", "Hello [laughs]"),
+        ("♪ I like to sing ♪", "♪ I like to sing ♪"),
+    ],
+)
+async def test_annotations_alone_are_not_speech(
+    fake: Fake, stt: WhisperCppSpeechToText, said: str, text: str
+) -> None:
+    """For silence or noise, whisper.cpp writes what it heard instead of words: alone, they are
+    nothing the learner said, so the session answers `no_speech`. Beside words, they stay."""
+    fake.handler = lambda r: (
+        _ok(r) if r.url.path.endswith("/load") else httpx2.Response(200, json={"text": said})
+    )
+
+    assert await stt.transcribe(b"w", MODEL_A, 30) == text
 
 
 async def test_transcribe_loads_a_different_model_first(
@@ -151,14 +192,14 @@ async def test_failed_load_forgets_the_loaded_model(
     await stt.transcribe(b"w", MODEL_A, 30)  # forgotten: loaded again
     assert fake.paths() == ["/v1/load"] * 3 + ["/v1/audio/transcriptions"]
 
-    # The file did not load: the server exited and dropped the connection.
+    # The file did not load: the server exited and dropped the connection (the retry too).
     fake.handler = _raising(httpx2.RemoteProtocolError("dropped", request=_request()))
     with pytest.raises(EngineUnreachable):
         await stt.load(MODEL_B)
 
     fake.handler = _ok
     await stt.transcribe(b"w", MODEL_A, 30)  # forgotten: loaded again
-    assert fake.paths()[4:] == ["/v1/load", "/v1/load", "/v1/audio/transcriptions"]
+    assert fake.paths()[4:] == ["/v1/load"] * 3 + ["/v1/audio/transcriptions"]
 
 
 @pytest.mark.parametrize(
@@ -185,6 +226,94 @@ async def test_connection_refused_or_dropped_is_engine_unreachable(
         await stt.transcribe(b"w", MODEL_A, 30)
 
 
+DROPPED = [
+    httpx2.RemoteProtocolError,
+    httpx2.ReadError,
+    httpx2.WriteError,
+    httpx2.CloseError,
+]
+"""How a pooled keep-alive connection the server had already closed fails, against a healthy
+server: as a server that died mid-request does."""
+
+
+@pytest.mark.parametrize("error_type", DROPPED)
+async def test_a_dropped_connection_is_retried_once(
+    fake: Fake, stt: WhisperCppSpeechToText, error_type: type[httpx2.TransportError]
+) -> None:
+    await stt.load(MODEL_A)
+    fake.handler = _failing_once(error_type("dropped", request=_request()))
+
+    assert await stt.transcribe(b"w", MODEL_A, 30) == "Hello there."
+
+    assert fake.paths() == ["/v1/load"] + ["/v1/audio/transcriptions"] * 2
+    await stt.transcribe(b"w", MODEL_A, 30)  # the model is still loaded
+    assert fake.paths()[3:] == ["/v1/audio/transcriptions"]
+
+
+@pytest.mark.parametrize("error_type", DROPPED)
+async def test_a_load_whose_connection_dropped_is_retried_once(
+    fake: Fake, stt: WhisperCppSpeechToText, error_type: type[httpx2.TransportError]
+) -> None:
+    fake.handler = _failing_once(error_type("dropped", request=_request()))
+
+    await stt.load(MODEL_A)
+    await stt.transcribe(b"w", MODEL_A, 30)
+
+    assert fake.paths() == ["/v1/load", "/v1/load", "/v1/audio/transcriptions"]
+
+
+@pytest.mark.parametrize("error_type", DROPPED)
+async def test_dropped_twice_is_engine_unreachable(
+    fake: Fake, stt: WhisperCppSpeechToText, error_type: type[httpx2.TransportError]
+) -> None:
+    await stt.load(MODEL_A)
+    fake.handler = _raising(error_type("dropped", request=_request()))
+
+    with pytest.raises(EngineUnreachable):
+        await stt.transcribe(b"w", MODEL_A, 30)
+    with pytest.raises(EngineUnreachable):
+        await stt.load(MODEL_B)
+
+    assert fake.paths()[1:] == ["/v1/audio/transcriptions"] * 2 + ["/v1/load"] * 2
+
+
+@pytest.mark.parametrize("error_type", [httpx2.ConnectError, httpx2.ConnectTimeout])
+async def test_a_refused_connection_is_not_retried(
+    fake: Fake, stt: WhisperCppSpeechToText, error_type: type[httpx2.TransportError]
+) -> None:
+    """Nothing answers on the port: the server is not running, and asking again at once would
+    only delay the fallback."""
+    await stt.load(MODEL_A)
+    fake.handler = _raising(error_type("refused", request=_request()))
+
+    with pytest.raises(EngineUnreachable):
+        await stt.transcribe(b"w", MODEL_A, 30)
+    with pytest.raises(EngineUnreachable):
+        await stt.load(MODEL_A)
+
+    assert fake.paths()[1:] == ["/v1/audio/transcriptions", "/v1/load"]
+
+
+async def test_a_dropped_retry_that_times_out_is_not_unreachable(
+    fake: Fake, stt: WhisperCppSpeechToText
+) -> None:
+    """The retry reached a server that answers, if slowly: it is still there."""
+    await stt.load(MODEL_A)
+    errors = iter(
+        [
+            httpx2.ReadError("dropped", request=_request()),
+            httpx2.ReadTimeout("slow", request=_request()),
+        ]
+    )
+    fake.handler = lambda _r: _raise(next(errors))
+
+    with pytest.raises(ProviderError) as slow:
+        await stt.transcribe(b"w", MODEL_A, 30)
+
+    assert not isinstance(slow.value, EngineUnreachable)
+    assert str(slow.value) == f"{BASE} did not answer in time."
+
+
 async def test_unreachable_forgets_the_loaded_model(
     fake: Fake, stt: WhisperCppSpeechToText
 ) -> None:
@@ -207,6 +336,7 @@ async def test_read_timeout_and_http_errors_are_not_unreachable(
         await stt.transcribe(b"w", MODEL_A, 7)
     assert not isinstance(slow.value, EngineUnreachable)
     assert slow.value.reason == "connection"
+    assert fake.paths() == ["/v1/load", "/v1/audio/transcriptions"]  # not retried
     timeout = fake.requests[-1].extensions["timeout"]
     assert timeout["read"] == 7
     assert timeout["connect"] == CONNECT_TIMEOUT_S
@@ -216,6 +346,7 @@ async def test_read_timeout_and_http_errors_are_not_unreachable(
         await stt.transcribe(b"w", MODEL_A, 30)
     assert not isinstance(failed.value, EngineUnreachable)
     assert failed.value.reason == "unavailable"
+    assert fake.paths()[2:] == ["/v1/load"]  # forgotten, loaded again, failed: not retried
 
     # A request this side could not send: the server is not the problem.
     fake.handler = _raising(httpx2.LocalProtocolError("ours", request=_request()))

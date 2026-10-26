@@ -13,9 +13,14 @@ A model file that exists but does not load makes the server process exit, which 
 connection, so a failed load always forgets the loaded model. Written against `httpx2` rather
 than the openai SDK: only the transport tells a refused or dropped connection (the server is
 not running, or has just died) from a read timeout (it is slow).
+
+A dropped connection is also how a pooled keep-alive connection fails once the server has closed
+it, against a healthy server: such a request is sent once more, at once, before the GPU counts
+as gone. A refused one is not: nothing listens on the port.
 """
 
 import asyncio
+import re
 from typing import Any
 
 import httpx2
@@ -29,9 +34,15 @@ from vt_contracts.speech import ModelStatus
 CONNECT_TIMEOUT_S = 3.0
 HEALTH_TIMEOUT_S = 3.0
 LOAD_TIMEOUT_S = 120.0
-_UNREACHABLE = (httpx2.NetworkError, httpx2.ConnectTimeout, httpx2.RemoteProtocolError)
-"""Refused (the server is not running) or dropped mid-request (it crashed, exited after a model
-that did not load, or was stopped). `NetworkError` covers connect, read, write and close."""
+_REFUSED = (httpx2.ConnectError, httpx2.ConnectTimeout)
+"""Nothing answers on the port: the server is not running."""
+_DROPPED = (httpx2.RemoteProtocolError, httpx2.ReadError, httpx2.WriteError, httpx2.CloseError)
+"""Dropped mid-request: the server crashed, exited after a model that did not load, or was
+stopped; or the pooled connection was one the server had already closed."""
+_UNREACHABLE = _REFUSED + _DROPPED
+_ANNOTATION = re.compile(r"\[[^\]]*\]|\([^)]*\)|[♩♪♫♬]")
+"""What whisper.cpp writes for silence or noise instead of words: `[BLANK_AUDIO]`,
+`[ Silence ]`, `(music)`, `♪`."""
 
 
 class WhisperCppSpeechToText:
@@ -53,11 +64,13 @@ class WhisperCppSpeechToText:
                 data={"response_format": "json", "language": LANGUAGE},
             )
         try:
-            return str(response.json()["text"]).strip()
+            text = str(response.json()["text"]).strip()
         except (ValueError, KeyError, TypeError) as error:
             raise ProviderError(
                 "bad_request", f"{self._base_url} did not answer like whisper.cpp."
             ) from error
+        # Annotations alone are no speech: "", which the session reports as `no_speech`.
+        return text if _ANNOTATION.sub("", text).strip() else ""
 
     async def running(self) -> bool:
         """503 means it is loading a model, which still means it is running."""
@@ -111,12 +124,15 @@ class WhisperCppSpeechToText:
         self._loaded = model
 
     async def _send(self, path: str, timeout_s: float, **content: Any) -> httpx2.Response:
-        """POSTs to the server; raises `ProviderError` (`EngineUnreachable` when it refuses or
-        drops the connection) and forgets the loaded model on any failure."""
+        """POSTs to the server, once more when the connection drops (see the module docstring);
+        raises `ProviderError` (`EngineUnreachable` when it refuses the connection or drops it
+        twice) and forgets the loaded model on any failure."""
+        url = f"{self._base_url}{path}"
         try:
-            response = await self._http.post(
-                f"{self._base_url}{path}", timeout=_timeout(timeout_s), **content
-            )
+            try:
+                response = await self._http.post(url, timeout=_timeout(timeout_s), **content)
+            except _DROPPED:
+                response = await self._http.post(url, timeout=_timeout(timeout_s), **content)
         except _UNREACHABLE as error:  # before `TimeoutException`: `ConnectTimeout` is one
             self._loaded = None
             raise EngineUnreachable(self._base_url) from error
