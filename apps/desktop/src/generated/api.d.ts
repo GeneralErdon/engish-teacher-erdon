@@ -442,7 +442,7 @@ export interface components {
             activate: boolean;
         };
         /** @enum {string} */
-        ErrorCode: "bad_event" | "not_started" | "llm_failed" | "stt_failed" | "tts_failed" | "no_speech" | "audio_too_short" | "speech_model_missing";
+        ErrorCode: "bad_event" | "not_started" | "llm_failed" | "stt_failed" | "tts_failed" | "no_speech" | "audio_too_short" | "speech_model_missing" | "speech_engine_unavailable";
         /** ErrorEvent */
         ErrorEvent: {
             code: components["schemas"]["ErrorCode"];
@@ -765,6 +765,14 @@ export interface components {
              */
             v: 1;
         };
+        /** SpeechEngineState */
+        SpeechEngineState: {
+            engine: components["schemas"]["SttEngine"];
+            /** Manageable */
+            manageable: boolean;
+            /** Running */
+            running: boolean;
+        };
         /** @enum {string} */
         SpeechKind: "recognition" | "voice";
         /** SpeechModel */
@@ -774,6 +782,7 @@ export interface components {
             /** Default */
             default: boolean;
             download: components["schemas"]["DownloadProgress"] | null;
+            engine: components["schemas"]["SttEngine"];
             /** English Only */
             english_only: boolean;
             /** From Configuration */
@@ -798,6 +807,8 @@ export interface components {
          * @description `GET /v1/speech/models`.
          */
         SpeechModels: {
+            /** Engines */
+            engines: components["schemas"]["SpeechEngineState"][];
             /** Last Error */
             last_error: string | null;
             /** Models */
@@ -814,6 +825,9 @@ export interface components {
         SpeechSettings: {
             /** Max Turn S */
             max_turn_s: number;
+            stt_engine: components["schemas"]["SttEngine"];
+            /** Stt Gpu Model */
+            stt_gpu_model: string;
             /** Stt Model */
             stt_model: string;
             /** Tts Model */
@@ -842,6 +856,9 @@ export interface components {
              * @enum {string}
              */
             source: "environment" | "saved";
+            stt_engine: components["schemas"]["SttEngine"];
+            /** Stt Gpu Model */
+            stt_gpu_model: string;
             /** Stt Model */
             stt_model: string;
             /** Tts Model */
@@ -854,8 +871,11 @@ export interface components {
         /** SpeechStatus */
         SpeechStatus: {
             recognition: components["schemas"]["ModelStatus"];
+            recognition_engine: components["schemas"]["SttEngine"];
             synthesis: components["schemas"]["ModelStatus"];
         };
+        /** @enum {string} */
+        SttEngine: "openai" | "whispercpp";
         /**
          * TranscriptFinal
          * @description What the learner said (or typed) in this turn, as the server will use it.

@@ -17,7 +17,13 @@ from typing import Literal, assert_never
 
 from vt_api.domain.audio import duration_s, to_wav
 from vt_api.domain.llm import PROVIDERS, ChatMessage, ProviderError
-from vt_api.domain.speech import SessionSpeech, VoiceChoice
+from vt_api.domain.speech import (
+    EngineUnreachable,
+    GpuProblem,
+    Recognition,
+    SessionSpeech,
+    VoiceChoice,
+)
 from vt_api.ports.llm import ChatModel
 from vt_api.realtime.sentences import SentenceSplitter, speakable
 from vt_api.services.learner import LearnerService
@@ -64,6 +70,9 @@ _MISSING: dict[SpeechKind, str] = {
     "recognition": "speech recognition",
     "voice": "the tutor's voice",
 }
+_GPU_STOPPED = (
+    "whisper.cpp (GPU) stopped answering: Speaches transcribes the rest of this conversation."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +101,8 @@ class ConversationSession:
         self._speech = speech
         self._clock = clock
         self._started: _Started | None = None
+        self._recognition: Recognition | None = None
+        """The engine and model transcribing: the session's, until its fallback takes over."""
         self._speak = False
         self._history: list[ChatMessage] = []
         self._turns = 0
@@ -127,11 +138,17 @@ class ConversationSession:
         profile = await self._learner.profile()
         speech = await self._speech.for_session()
         self._started = _Started(model, profile, topic, speech)
+        self._recognition = speech.recognition
         await self._send(
             SessionReady(
                 level=profile.level, provider=PROVIDERS[provider.kind].label, model=provider.model
             )
         )
+        if speech.gpu_problem is not None:
+            await self._error(
+                "speech_engine_unavailable",
+                _gpu_unavailable(speech.gpu_problem, speech.gpu_model_label),
+            )
         for kind in speech.missing:
             await self._error(
                 "speech_model_missing",
@@ -171,9 +188,7 @@ class ConversationSession:
     async def _run_voice(self, started: _Started, pcm: bytes, cut: bool) -> None:
         since = self._clock()
         try:
-            text = await self._speech.transcribe(
-                to_wav(pcm), duration_s(len(pcm)), started.speech.stt_model
-            )
+            text = await self._transcribe(started.speech, to_wav(pcm), duration_s(len(pcm)))
         except ProviderError as error:
             await self._error("stt_failed", f"Speech recognition failed. {error.message}")
             return
@@ -181,6 +196,23 @@ class ConversationSession:
             await self._error("no_speech", "I did not catch that. Try again, closer to the mic.")
             return
         await self.learner_said(text, "voice", stt_ms=self._elapsed_ms(since), cut=cut)
+
+    async def _transcribe(self, speech: SessionSpeech, wav: bytes, audio_s: float) -> str:
+        """With the session's engine. The first turn to find the GPU server gone switches the
+        rest of the conversation to the fallback, warns once, and is transcribed there itself.
+        Raises `ProviderError`: a slow or failing server that still answers is `stt_failed`."""
+        recognition = self._recognition or speech.recognition  # `_start` sets both
+        fallback = speech.fallback
+        try:
+            return await self._speech.transcribe(wav, audio_s, recognition)
+        except EngineUnreachable:
+            if fallback is None:
+                raise
+        # No await between this check and the switch: of turns failing together, one warns.
+        if self._recognition != fallback:
+            self._recognition = fallback
+            await self._error("speech_engine_unavailable", _GPU_STOPPED)
+        return await self._speech.transcribe(wav, audio_s, fallback)
 
     async def _not_started(self) -> None:
         await self._send(
@@ -380,6 +412,35 @@ class _Speaker:
                 AssistantAudioStarted(turn_id=self._turn_id, sample_rate=OUTPUT_SAMPLE_RATE_HZ)
             )
         await self._send_audio(pcm)
+
+
+def _gpu_unavailable(problem: GpuProblem, model_label: str | None) -> str:
+    """Why whisper.cpp (GPU), the chosen engine, does not transcribe the conversation that
+    starts, and what to do. Only it can be unavailable: Speaches is what stands in for it."""
+    match problem:
+        case "stopped":
+            return (
+                "whisper.cpp (GPU) is not running: Speaches transcribes this conversation. Start "
+                "it with `just voice gpu`, or choose Speaches in Settings → Voice."
+            )
+        case "no_models_dir":
+            return (
+                "whisper.cpp (GPU) needs VT_SPEECH_MODELS_DIR, the models folder it shares with "
+                "the api: Speaches transcribes this conversation (see docs/configuration.md)."
+            )
+        case "no_model":
+            return (
+                "No whisper.cpp (GPU) model is downloaded: Speaches transcribes this "
+                "conversation. Download one in Settings → Voice, or run `just voice gpu`."
+            )
+        case "load_failed":
+            return (
+                f"whisper.cpp (GPU) could not load {model_label}, perhaps for lack of GPU "
+                "memory: Speaches transcribes this conversation. Choose a smaller GPU model in "
+                "Settings → Voice."
+            )
+        case _:
+            assert_never(problem)
 
 
 async def _cancel(task: asyncio.Task[None]) -> None:

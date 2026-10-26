@@ -1,5 +1,14 @@
 import { Link } from '@tanstack/react-router'
-import { MessagesSquare, MicOff, Phone, RotateCw, Volume2, VolumeOff, WifiOff } from 'lucide-react'
+import {
+  MessagesSquare,
+  MicOff,
+  Phone,
+  RotateCw,
+  TriangleAlert,
+  Volume2,
+  VolumeOff,
+  WifiOff,
+} from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -135,6 +144,12 @@ export function PracticePage() {
               <RotateCw /> Reconnect
             </Button>
           </AlertDescription>
+        </Alert>
+      )}
+      {conversation.notice && (
+        <Alert>
+          <TriangleAlert className="text-warning" />
+          <AlertDescription>{conversation.notice}</AlertDescription>
         </Alert>
       )}
       {conversation.error && (

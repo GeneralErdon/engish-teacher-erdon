@@ -2,6 +2,7 @@
 HTTP transport (OpenAI-compatible servers answering with SSE streams, JSON and raw PCM)."""
 
 import json
+from pathlib import Path
 from unittest.mock import create_autospec
 
 import httpx2
@@ -13,23 +14,27 @@ from starlette.testclient import WebSocketTestSession
 from starlette.websockets import WebSocketDisconnect
 
 from vt_api.adapters.chat_factory import SdkChatModelFactory
+from vt_api.adapters.model_files import HfModelFiles
 from vt_api.adapters.openai_stt import OpenAISpeechToText
 from vt_api.adapters.openai_tts import OpenAITextToSpeech
 from vt_api.adapters.speaches import SpeachesServer
 from vt_api.adapters.sql.database import Database
 from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
 from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
+from vt_api.adapters.whispercpp import WhisperCppSpeechToText
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.domain.llm import environment_config
 from vt_api.main import create_app
+from vt_api.ports.speech import ModelFiles
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
 from vt_api.services.speech import SpeechService
-from vt_contracts.speech import SpeechSettings
+from vt_contracts.speech import SpeechSettings, SttEngine
 from vt_contracts.ws import SERVER_EVENT, ServerEvent, TurnMetrics
 
 VOICE = b"\x01\x00" * 2_400  # 0.1 s of PCM16 at 24 kHz
+HALF_A_SECOND = bytes(16_000)  # PCM16 at 16 kHz
 
 CORRECTION = {
     "corrected": "I went to the beach",
@@ -73,8 +78,18 @@ def _provider(request: httpx2.Request) -> httpx2.Response:
     return _sse("Nice", "! What did you do?")
 
 
-@pytest.fixture
-def client(database: Database, learner_service: LearnerService) -> TestClient:
+def _refused(request: httpx2.Request) -> httpx2.Response:
+    """The whisper.cpp server's port, with nothing listening on it."""
+    raise httpx2.ConnectError("Connection refused", request=request)
+
+
+def _client(
+    database: Database,
+    learner_service: LearnerService,
+    *,
+    stt_engine: SttEngine = "openai",
+    files: ModelFiles | None = None,
+) -> TestClient:
     transport = httpx2.MockTransport(_provider)
     chat_models = SdkChatModelFactory(
         openai_http=httpx2.AsyncClient(transport=transport),
@@ -106,13 +121,20 @@ def client(database: Database, learner_service: LearnerService) -> TestClient:
         tts=tts,
         recognition_server=create_autospec(SpeachesServer, instance=True),
         voice_server=create_autospec(SpeachesServer, instance=True),
-        files=None,
+        files=files,
         defaults=SpeechSettings(
             stt_model="whisper",
+            stt_engine=stt_engine,
+            stt_gpu_model="ggerganov/whisper.cpp/ggml-small.en-q8_0.bin",
             tts_model="kokoro",
             tts_voice="af_heart",
             tts_speed=1.0,
             max_turn_s=120,
+        ),
+        gpu_stt=WhisperCppSpeechToText(
+            httpx2.AsyncClient(transport=httpx2.MockTransport(_refused)),
+            "http://stt-gpu:8080/v1",
+            "/models",
         ),
     )
     container = Container(
@@ -121,6 +143,17 @@ def client(database: Database, learner_service: LearnerService) -> TestClient:
         speech=speech,
     )
     return TestClient(create_app(Settings(_env_file=None), container=container))
+
+
+@pytest.fixture
+def client(database: Database, learner_service: LearnerService) -> TestClient:
+    return _client(database, learner_service)
+
+
+def _speak(ws: WebSocketTestSession, pcm: bytes = HALF_A_SECOND) -> None:
+    for start in range(0, len(pcm), 640):  # 20 ms frames
+        ws.send_bytes(pcm[start : start + 640])
+    ws.send_text(json.dumps({"type": "input.commit", "v": 1}))
 
 
 def _receive(ws: WebSocketTestSession, count: int) -> list[ServerEvent]:
@@ -161,13 +194,10 @@ def test_a_conversation_over_the_socket(client: TestClient) -> None:
 
 
 def test_a_spoken_turn(client: TestClient) -> None:
-    half_a_second = bytes(16_000)  # PCM16 at 16 kHz
     with client.websocket_connect("/ws/session") as ws:
         ws.send_text(json.dumps({"type": "session.start", "v": 1}))
         _receive(ws, 1)
-        for start in range(0, len(half_a_second), 640):  # 20 ms frames
-            ws.send_bytes(half_a_second[start : start + 640])
-        ws.send_text(json.dumps({"type": "input.commit", "v": 1}))
+        _speak(ws)
         [transcript] = _receive(ws, 1)
         ws.send_text(json.dumps({"type": "session.end", "v": 1}))
 
@@ -180,6 +210,34 @@ def test_a_spoken_turn(client: TestClient) -> None:
         "stt_ms": 0,
         "cut": False,
     }
+
+
+def test_a_session_on_a_stopped_gpu_engine_warns_and_uses_speaches(
+    database: Database, learner_service: LearnerService, tmp_path: Path
+) -> None:
+    """Review Focus 2: whisper.cpp is the chosen engine (`VT_STT_BACKEND`), but nothing answers
+    on its port."""
+    files = HfModelFiles(tmp_path / "models")
+    client = _client(database, learner_service, stt_engine="whispercpp", files=files)
+    with client.websocket_connect("/ws/session") as ws:
+        ws.send_text(json.dumps({"type": "session.start", "v": 1}))
+        ready, warning = _receive(ws, 2)
+        _speak(ws)
+        [transcript] = _receive(ws, 1)
+        ws.send_text(json.dumps({"type": "session.end", "v": 1}))
+
+    assert ready.type == "session.ready"
+    assert warning.model_dump() == {
+        "v": 1,
+        "type": "error",
+        "code": "speech_engine_unavailable",
+        "message": (
+            "whisper.cpp (GPU) is not running: Speaches transcribes this conversation. Start it "
+            "with `just voice gpu`, or choose Speaches in Settings → Voice."
+        ),
+        "retryable": True,
+    }
+    assert transcript.model_dump()["text"] == "I have went to the beach"  # Speaches answered
 
 
 def test_the_tutor_speaks(client: TestClient) -> None:
@@ -252,6 +310,7 @@ def test_the_schema_describes_the_socket_events(client: TestClient) -> None:
 def test_speech_status(client: TestClient) -> None:
     status = client.get("/v1/speech/status").json()
 
+    assert status["recognition_engine"] == "openai"
     assert status["recognition"] == {
         "base_url": "http://stt/v1",
         "model": "whisper",

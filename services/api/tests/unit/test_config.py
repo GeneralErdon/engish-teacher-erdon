@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from vt_api.config import Settings
+from vt_api.domain.speech import DEFAULT_GPU_MODEL
 
 
 def test_defaults_match_docs() -> None:
@@ -43,6 +44,9 @@ def test_reads_vt_prefixed_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         ("VT_LLM_PROVIDER", "mistral"),
         ("VT_UI_DIR", "/does/not/exist"),
         ("VT_DATABASE_URL", "postgresql://db/voice"),
+        ("VT_STT_BACKEND", "whisper"),
+        ("VT_STT_GPU_MODEL", "ggml-small.bin"),  # not a file of a repository
+        ("VT_STT_GPU_MODELS_ROOT", "models"),  # a path in the server's container: absolute
     ],
 )
 def test_invalid_values_fail_at_startup(
@@ -81,3 +85,21 @@ def test_speech_models_dir_and_turn_length(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("VT_SPEECH_MODELS_DIR", "data/models")
 
     assert Settings(_env_file=None).speech_models_dir == Path("data/models")
+
+
+def test_the_gpu_engine_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.stt_backend == "openai"
+    assert str(settings.stt_gpu_base_url) == "http://stt-gpu:8080/v1"
+    assert settings.stt_gpu_models_root == "/models"
+    assert settings.stt_gpu_model == DEFAULT_GPU_MODEL
+
+    monkeypatch.setenv("VT_STT_BACKEND", "whispercpp")
+    monkeypatch.setenv("VT_STT_GPU_MODEL", "ggerganov/whisper.cpp/ggml-base.en.bin")
+
+    settings = Settings(_env_file=None)
+    assert (settings.stt_backend, settings.stt_gpu_model) == (
+        "whispercpp",
+        "ggerganov/whisper.cpp/ggml-base.en.bin",
+    )

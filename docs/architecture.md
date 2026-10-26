@@ -21,7 +21,7 @@
 | `ui` | this repo | React + TypeScript: mic capture (AudioWorklet), voice activity detection for call mode (Silero VAD on ONNX Runtime Web), playback, conversation, Markdown notes viewer, progress. Runs inside `desktop` **and** in a plain browser (served by `api`) | WebSocket + REST to `api` |
 | `api` | this repo | Realtime session (turns, streamed replies and voice, cancellation), teacher logic, notes, progress, persistence | FastAPI: REST + `/ws/session` |
 | `pron` | this repo | Pronunciation scoring: G2P → phoneme recognition → alignment → per-phoneme verdicts | REST `POST /v1/score` |
-| `stt` | third party | Speech-to-text (Speaches/faster-whisper or whisper.cpp) | OpenAI `/v1/audio/transcriptions` (or whisper.cpp `/inference` via adapter) |
+| `stt` | third party | Speech-to-text, two engines picked in Settings → Voice: Speaches/faster-whisper (CPU) and whisper.cpp with Vulkan (GPU, `stt-gpu`) | OpenAI `/v1/audio/transcriptions` (whisper.cpp's server answers the same route; GGML models are loaded with its `/load`) |
 | `llm` | third party | Chat model: Ollama (local or cloud), llama.cpp server, LM Studio, OpenAI, Anthropic, Gemini, or any compatible server. Chosen in the UI (`/v1/llm/*`) or with `VT_LLM_*` | OpenAI `/v1/chat/completions` or Anthropic `/v1/messages` (streaming) |
 | `tts` | third party | Text-to-speech: Kokoro on ONNX Runtime, served by the same Speaches as `stt` (Kokoro-FastAPI also works) | OpenAI `/v1/audio/speech` (streaming PCM, 24 kHz) |
 
@@ -61,7 +61,7 @@ voice-tutor/
 │       └── release.yml          # every merge into master: GitHub release + images to GHCR
 ├── docker/
 │   ├── caddy/Caddyfile          # optional HTTPS for LAN access
-│   └── whisper-vulkan/Dockerfile# whisper.cpp built with Vulkan (AMD/Intel)
+│   └── stt-gpu/start.sh         # starts whisper.cpp (Vulkan: AMD/Intel) on the chosen GGML model
 ├── packages/
 │   └── contracts/               # shared Pydantic models (WS protocol, pron API)
 │       └── src/vt_contracts/
@@ -86,7 +86,7 @@ voice-tutor/
 │   │   │   ├── adapters/
 │   │   │   │   ├── openai_models.py # is a speech server up, with our model downloaded?
 │   │   │   │   ├── openai_stt.py
-│   │   │   │   ├── whispercpp_stt.py
+│   │   │   │   ├── whispercpp.py    # whisper.cpp on the GPU: transcribe, /load, /health
 │   │   │   │   ├── openai_chat.py   # Chat Completions: OpenAI, Gemini, Ollama, llama.cpp, LM Studio...
 │   │   │   │   ├── anthropic_chat.py# Messages API: Anthropic and compatible servers
 │   │   │   │   ├── chat_factory.py  # provider settings → the right chat adapter
@@ -290,3 +290,4 @@ The same code ships in two forms. Only *who starts the processes* changes: the a
 | 9 | UI: TanStack Router (file routes, code split per page) + TanStack Query over a client generated from the api's OpenAPI schema (`openapi-fetch` + `openapi-react-query`); react-hook-form + zod; shadcn/ui (Radix) + Tailwind 4; `motion` loaded lazily (`LazyMotion`) | One source of truth for API types, from the Pydantic models to the hooks; accessible primitives without a component library to fight; animations that cost nothing until first paint and respect reduced motion | Hand-written fetch types, Redux, MUI/Chakra, CSS-in-JS |
 | 10 | Voice activity detection in the UI (Silero VAD on ONNX Runtime Web), not in the api | Barge-in where the audio plays, with no network round trip; the UI knows when the tutor is audible and makes detection stricter then; the protocol stays push-to-talk's (frames + `input.commit`), so the api needs no model and only receives speech | Silero in the api (continuous upstream audio, barge-in one round trip later, a model to download on the server) |
 | 11 | The api owns speech model files; Speaches only serves them | Settings → Voice needs progress, cancel and uninstall from the UI, so the api downloads into a Hugging Face cache folder that Speaches mounts (`data/models`); Phase 4's first-run model download reuses the same manager | Speaches' own download endpoint (no progress, no cancel) |
+| 12 | Speech recognition engines: Speaches and whisper.cpp (Vulkan) behind one port; the api switches between running servers and never manages containers | AMD and Intel GPUs transcribe through Vulkan without ROCm; the api only needs each server's URL and the shared model folder, so Compose, a native process (Phase 4, the same engine) and a remote server all work | The api starting and stopping containers through Docker's socket (root on the host) |

@@ -10,6 +10,7 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 - [ ] Mic capture inside Tauri on **Linux (WebKitGTK)** and **Windows (WebView2)**. Go/no-go for `getUserMedia`; otherwise native `cpal` fallback. Capture is implemented (AudioWorklet, tested with fakes, 2026-10-22); the manual check in both webviews is pending
 - [ ] Silero VAD + Speaches + llama.cpp (Vulkan) + Kokoro wired in a throwaway script on the reference machine
 - [ ] Measure voice-to-voice latency. **Go if p50 < 1.5 s**. Every turn reports speech recognition, first word, first sound and full reply times (`transcript.final.stt_ms`, `turn.metrics`), shown under each reply; voice to voice = heard + first sound. Pending: a run on the reference machine with the models downloaded
+  - Compare speech recognition on the CPU (Speaches) and the GPU (`just voice gpu`, whisper.cpp) with the `heard` metric
 - [ ] `pronounce-assess` / wav2vec2 phoneme model on 10 self-recorded sentences, compared with a commercial app. **Go if obvious errors are detected**
 
 ## Phase 1: Conversation MVP (≈ 20–25 h)

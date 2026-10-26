@@ -4,6 +4,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
+from functools import partial
 
 import anthropic
 import anyio
@@ -21,8 +22,10 @@ from vt_api.adapters.sql.database import Database, open_database
 from vt_api.adapters.sql.learner_profile import SqlLearnerProfileRepository
 from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
 from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
+from vt_api.adapters.whispercpp import WhisperCppSpeechToText
 from vt_api.config import Settings
 from vt_api.domain.llm import environment_config
+from vt_api.domain.speech import single_file_repos
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
 from vt_api.services.speech import SpeechService
@@ -86,7 +89,13 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
         speaches_http = httpx2.AsyncClient(timeout=TTS_TIMEOUT_S)
         stack.push_async_callback(speaches_http.aclose)
         files = (
-            await anyio.to_thread.run_sync(HfModelFiles, settings.speech_models_dir)
+            await anyio.to_thread.run_sync(
+                partial(
+                    HfModelFiles,
+                    settings.speech_models_dir,
+                    single_file_repos=single_file_repos(settings.stt_gpu_model),
+                )
+            )
             if settings.speech_models_dir is not None
             else None
         )
@@ -99,10 +108,15 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
             files=files,
             defaults=SpeechSettings(
                 stt_model=settings.stt_model,
+                stt_engine=settings.stt_backend,
+                stt_gpu_model=settings.stt_gpu_model,
                 tts_model=settings.tts_model,
                 tts_voice=settings.tts_voice,
                 tts_speed=settings.tts_speed,
                 max_turn_s=settings.max_turn_s,
+            ),
+            gpu_stt=WhisperCppSpeechToText(
+                speaches_http, str(settings.stt_gpu_base_url), settings.stt_gpu_models_root
             ),
         )
         # Pushed last, so it runs first: a running download stops before the clients close.

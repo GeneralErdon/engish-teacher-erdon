@@ -31,8 +31,8 @@ export function SpeechSection() {
 }
 
 /**
- * Are local speech recognition and the tutor's voice ready? Both run in Speaches; if something
- * is missing, the exact steps to get there.
+ * Are local speech recognition and the tutor's voice ready? Both run in Speaches, or recognition
+ * runs in whisper.cpp on the GPU; if something is missing, the exact steps to get there.
  */
 function Readiness() {
   const speech = useSpeechStatus()
@@ -47,14 +47,22 @@ function Readiness() {
     )
   }
 
-  const { recognition, synthesis } = speech.data
+  const { recognition, synthesis, recognition_engine: engine } = speech.data
+  const gpu = engine === 'whispercpp'
   const missing = [recognition, synthesis].filter((status) => !status.model_ready)
   const stopped = missing.some((status) => !status.reachable)
+  // whisper.cpp answers but holds no model: it is loading one, or stuck after a failed load.
+  const gpuLoading = gpu && !recognition.model_ready
+  // speaches-cli downloads only Speaches models, not whisper.cpp's GGML files.
+  const onSpeaches = missing.filter((status) => !(gpu && status === recognition))
   const servers = [...new Set([recognition.base_url, synthesis.base_url])]
   return (
     <div className="flex flex-col gap-4">
       <ul className="flex flex-col gap-2">
-        <ModelRow label="Speech recognition" status={recognition} />
+        <ModelRow
+          label={gpu ? 'Speech recognition · whisper.cpp (GPU)' : 'Speech recognition'}
+          status={recognition}
+        />
         <ModelRow label="Tutor's voice" status={synthesis} />
       </ul>
       {missing.length > 0 && (
@@ -62,20 +70,37 @@ function Readiness() {
           <TriangleAlert className="text-warning" />
           <AlertTitle>One-time setup</AlertTitle>
           <AlertDescription className="flex w-full flex-col gap-2">
-            <span>
-              {stopped
-                ? 'Start Speaches, which runs both on your machine. The first start downloads the models (~700 MB) and waits until they are ready:'
-                : 'Run this again: it downloads what is missing.'}
-            </span>
-            <Command>just voice</Command>
-            {!stopped && (
+            {stopped ? (
               <>
-                <span>Or, on a Speaches you started yourself:</span>
-                {missing.map((status) => (
-                  <Command key={status.model}>
-                    {`SPEACHES_BASE_URL=http://localhost:8000 uvx speaches-cli model download ${status.model}`}
-                  </Command>
-                ))}
+                <span>
+                  {gpu
+                    ? 'Start Speaches and the GPU speech recognition server:'
+                    : 'Start Speaches, which runs both on your machine. The first start downloads the models (~700 MB) and waits until they are ready:'}
+                </span>
+                <Command>{gpu ? 'just voice gpu' : 'just voice'}</Command>
+              </>
+            ) : (
+              <>
+                {gpuLoading && (
+                  <>
+                    <span>
+                      The GPU speech recognition server is loading a model, or needs a restart:
+                    </span>
+                    <Command>docker compose restart stt-gpu</Command>
+                  </>
+                )}
+                {onSpeaches.length > 0 && (
+                  <>
+                    <span>Run this again: it downloads what is missing.</span>
+                    <Command>{gpu ? 'just voice gpu' : 'just voice'}</Command>
+                    <span>Or, on a Speaches you started yourself:</span>
+                    {onSpeaches.map((status) => (
+                      <Command key={status.model}>
+                        {`SPEACHES_BASE_URL=http://localhost:8000 uvx speaches-cli model download ${status.model}`}
+                      </Command>
+                    ))}
+                  </>
+                )}
               </>
             )}
           </AlertDescription>

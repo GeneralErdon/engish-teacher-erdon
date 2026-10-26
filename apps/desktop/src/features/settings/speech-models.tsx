@@ -12,6 +12,7 @@ import { useModelActions } from './use-speech'
 
 type Model = Schemas['SpeechModel']
 type Kind = Schemas['SpeechKind']
+type SttEngine = Schemas['SttEngine']
 
 const MB = 1_000_000
 
@@ -25,6 +26,7 @@ const size = (model: Model) => (model.approx_mb > 0 ? `${String(model.approx_mb)
 export function ModelList({
   label,
   kind,
+  engine,
   models,
   manageable,
   pending,
@@ -34,6 +36,8 @@ export function ModelList({
   /** Accessible name of the radio group. */
   label: string
   kind: Kind
+  /** Only the rows of this recognition engine; omitted, every row of the kind is listed. */
+  engine?: SttEngine
   models: readonly Model[]
   /** False when the api cannot reach the models folder: the list is read-only. */
   manageable: boolean
@@ -44,7 +48,9 @@ export function ModelList({
   onUse: (model: Model) => void
 }) {
   const actions = useModelActions()
-  const rows = models.filter((model) => model.kind === kind)
+  const rows = models.filter(
+    (model) => model.kind === kind && (engine === undefined || model.engine === engine),
+  )
   const selected = rows.find((model) => model.selected)
   const error = [actions.download, actions.cancel, actions.uninstall].find((m) => m.isError)?.error
 

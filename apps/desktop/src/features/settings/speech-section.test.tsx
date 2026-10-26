@@ -16,6 +16,13 @@ function section() {
   return within(card)
 }
 
+/** The "One-time setup" alert: the engine choice below it shows start commands too. */
+function setup() {
+  const alert = section().getByText('One-time setup').closest('[data-slot="alert"]')
+  if (!(alert instanceof HTMLElement)) throw new Error('no setup alert')
+  return within(alert)
+}
+
 function notReady(api: FakeApi, part: 'recognition' | 'synthesis', reachable = true) {
   const detail = reachable ? null : 'Could not connect to http://localhost:8000/v1.'
   api.speech = {
@@ -43,9 +50,9 @@ describe('Voice settings', () => {
 
     expect(await screen.findByText('One-time setup')).toBeInTheDocument()
     expect(section().getAllByText('Could not connect to http://localhost:8000/v1.')).toHaveLength(2)
-    expect(section().getByText('just voice')).toBeInTheDocument()
-    expect(section().getByText(/first start downloads the models/)).toBeInTheDocument()
-    expect(section().queryByText(/speaches-cli/)).not.toBeInTheDocument()
+    expect(setup().getByText('just voice')).toBeInTheDocument()
+    expect(setup().getByText(/first start downloads the models/)).toBeInTheDocument()
+    expect(setup().queryByText(/speaches-cli/)).not.toBeInTheDocument()
   })
 
   it('only asks for the missing model when the server runs, and checks again', async () => {
@@ -54,15 +61,60 @@ describe('Voice settings', () => {
     const { user } = renderApp('/settings', api)
 
     expect(await screen.findByText('Not ready.')).toBeInTheDocument()
-    expect(section().getByText(/downloads what is missing/)).toBeInTheDocument()
-    expect(section().getByText('just voice')).toBeInTheDocument()
-    expect(section().getByText(download(TTS))).toBeInTheDocument()
-    expect(section().queryByText(download(STT))).not.toBeInTheDocument()
+    expect(setup().getByText(/downloads what is missing/)).toBeInTheDocument()
+    expect(setup().getByText('just voice')).toBeInTheDocument()
+    expect(setup().getByText(download(TTS))).toBeInTheDocument()
+    expect(setup().queryByText(download(STT))).not.toBeInTheDocument()
 
     api.speech = fakeApi().speech
     await user.click(section().getByRole('button', { name: /check again/i }))
 
     expect(await screen.findByText(TTS)).toBeInTheDocument()
+  })
+
+  it('names whisper.cpp and its start command when it transcribes', async () => {
+    const api = fakeApi()
+    api.speech.recognition_engine = 'whispercpp'
+    notReady(api, 'recognition', false)
+    renderApp('/settings', api)
+
+    expect(await screen.findByText('Speech recognition · whisper.cpp (GPU)')).toBeInTheDocument()
+    expect(
+      setup().getByText('Start Speaches and the GPU speech recognition server:'),
+    ).toBeInTheDocument()
+    expect(setup().getByText('just voice gpu')).toBeInTheDocument()
+    expect(setup().queryByText('just voice')).not.toBeInTheDocument()
+    expect(setup().queryByText(/700 MB/)).not.toBeInTheDocument()
+    expect(setup().queryByText(/speaches-cli/)).not.toBeInTheDocument()
+  })
+
+  it('says how to restart whisper.cpp when it answers but holds no model', async () => {
+    const api = fakeApi()
+    api.speech.recognition_engine = 'whispercpp'
+    notReady(api, 'recognition')
+    renderApp('/settings', api)
+
+    expect(
+      await screen.findByText(
+        'The GPU speech recognition server is loading a model, or needs a restart:',
+      ),
+    ).toBeInTheDocument()
+    expect(setup().getByText('docker compose restart stt-gpu')).toBeInTheDocument()
+    // speaches-cli cannot download whisper.cpp's GGML files.
+    expect(setup().queryByText(/speaches-cli/)).not.toBeInTheDocument()
+    expect(setup().queryByText(/downloads what is missing/)).not.toBeInTheDocument()
+  })
+
+  it('still offers the Speaches download for the voice while whisper.cpp transcribes', async () => {
+    const api = fakeApi()
+    api.speech.recognition_engine = 'whispercpp'
+    notReady(api, 'synthesis')
+    renderApp('/settings', api)
+
+    expect(await screen.findByText(/downloads what is missing/)).toBeInTheDocument()
+    expect(setup().getByText('just voice gpu')).toBeInTheDocument()
+    expect(setup().getByText(download(TTS))).toBeInTheDocument()
+    expect(setup().queryByText(/loading a model/)).not.toBeInTheDocument()
   })
 
   it('lists each server when they differ', async () => {

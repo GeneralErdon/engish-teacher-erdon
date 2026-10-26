@@ -1,6 +1,6 @@
 """Ports for speech: the learner's voice to text, and the tutor's text to voice."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Collection
 from typing import Protocol
 
 from vt_api.domain.speech import VoiceChoice
@@ -14,6 +14,25 @@ class SpeechToText(Protocol):
 
     async def status(self, model: str) -> ModelStatus:
         """Whether the server answers and has `model`; never raises."""
+        ...
+
+
+class GpuSpeechToText(SpeechToText, Protocol):
+    """Speech recognition on a GPU server that holds one model at a time (whisper.cpp).
+
+    `model` is always the file's path relative to the shared models folder, in `transcribe` too.
+    """
+
+    async def running(self) -> bool:
+        """Whether the server answers its health check (also while it loads a model); never
+        raises."""
+        ...
+
+    async def load(self, model: str) -> None:
+        """Make the server load `model`, always: no route says which model it holds, and a
+        restart brings back its startup model. Called when a conversation starts. Raises
+        `ProviderError`, and `EngineUnreachable` when the server is not running or drops the
+        connection (a model that does not load makes it exit)."""
         ...
 
 
@@ -84,6 +103,15 @@ class ModelFiles(Protocol):
     async def incomplete(self) -> set[str]:
         """The models whose files are half-written: a download that has not finished, or one an
         api killed mid-download left. The server may list them, but they are not installed."""
+        ...
+
+    async def present(self, model_ids: Collection[str]) -> set[str]:
+        """The single-file ids (`org/name/file`) among `model_ids` whose file is complete in the
+        folder. Never the file a download of ours is writing."""
+        ...
+
+    async def snapshot_path(self, model_id: str) -> str | None:
+        """The complete file's POSIX path relative to the folder, or `None`."""
         ...
 
     def cleanup(self) -> None:

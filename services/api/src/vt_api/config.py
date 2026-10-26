@@ -10,11 +10,12 @@ from typing import Literal
 from pydantic import DirectoryPath, Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from vt_api.domain.speech import DEFAULT_GPU_MODEL
 from vt_contracts.learner import CefrLevel, ExplanationLanguage
 from vt_contracts.llm import ProviderKind
+from vt_contracts.speech import SttEngine
 
 type Profile = Literal["cpu", "nvidia", "amd", "external"]
-type SttBackend = Literal["openai", "whispercpp"]
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 DEFAULT_CORS_ORIGINS = (
@@ -51,11 +52,17 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr = SecretStr("")
     llm_temperature: float = Field(default=0.6, ge=0.0, le=2.0)
 
-    # Speech-to-text
-    stt_backend: SttBackend = "openai"
+    # Speech-to-text. The engine until one is saved from the UI: Speaches (`openai`) or
+    # whisper.cpp on a Vulkan GPU (`whispercpp`).
+    stt_backend: SttEngine = "openai"
     stt_base_url: HttpUrl = HttpUrl("http://stt:8000/v1")
     # Speaches model id. CPU: distil small.en (fast). GPU: Systran/faster-whisper-large-v3-turbo.
     stt_model: str = "Systran/faster-distil-whisper-small.en"
+    stt_gpu_base_url: HttpUrl = HttpUrl("http://stt-gpu:8080/v1")
+    # The shared models folder (`speech_models_dir`) as the whisper.cpp server sees it.
+    stt_gpu_models_root: str = Field(default="/models", pattern=r"^/")
+    # The whisper.cpp model: one GGML file of a Hugging Face repository (`org/name/file`).
+    stt_gpu_model: str = Field(default=DEFAULT_GPU_MODEL, pattern=r"^[^/]+/[^/]+/[^/]+$")
 
     # Text-to-speech: Kokoro, served by the same Speaches as speech-to-text.
     tts_base_url: HttpUrl = HttpUrl("http://tts:8000/v1")

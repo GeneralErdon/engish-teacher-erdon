@@ -7,13 +7,16 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
+from alembic import command
 from alembic.autogenerate import compare_metadata
+from alembic.config import Config
 from alembic.migration import MigrationContext
 from pydantic import SecretStr
-from sqlalchemy import text
+from sqlalchemy import Connection, text
 
 from vt_api.adapters.secret_key import MasterKey
 from vt_api.adapters.sql.database import (
+    MIGRATIONS,
     Database,
     DatabaseKeyError,
     migrate,
@@ -25,11 +28,20 @@ from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
 from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
 from vt_api.adapters.sql.tables import Base
 from vt_api.domain.llm import LlmConfig, ProviderConfig
+from vt_api.domain.speech import DEFAULT_GPU_MODEL
 from vt_contracts.learner import LearnerProfile
 from vt_contracts.speech import SpeechSettings
 
 # Built from parts so secret scanners do not flag a fake key.
 FAKE_KEY = "sk-" + "fake" * 3 + "3456"
+
+
+def _alembic(connection: Connection) -> Config:
+    """Migrations run on `connection`, as `migrate` runs them."""
+    config = Config()
+    config.set_main_option("script_location", MIGRATIONS)
+    config.attributes["connection"] = connection
+    return config
 
 
 def _config(api_key: str = FAKE_KEY) -> LlmConfig:
@@ -87,14 +99,8 @@ def test_the_migrations_match_the_tables(database: Database) -> None:
 
 
 def test_migrations_go_down_and_up_again(database: Database) -> None:
-    from alembic import command
-    from alembic.config import Config
-
-    config = Config()
-    config.set_main_option("script_location", "vt_api.adapters.sql:migrations")
     with database.engine.begin() as connection:
-        config.attributes["connection"] = connection
-        command.downgrade(config, "base")
+        command.downgrade(_alembic(connection), "base")
         tables = connection.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
         assert [name for (name,) in tables] == ["alembic_version"]
 
@@ -241,6 +247,8 @@ async def test_learner_profile_round_trip(database: Database) -> None:
 def _speech_settings(**changes: object) -> SpeechSettings:
     values: dict[str, object] = {
         "stt_model": "Systran/faster-distil-whisper-small.en",
+        "stt_engine": "openai",
+        "stt_gpu_model": DEFAULT_GPU_MODEL,
         "tts_model": "speaches-ai/Kokoro-82M-v1.0-ONNX",
         "tts_voice": "af_heart",
         "tts_speed": 0.95,
@@ -259,6 +267,49 @@ async def test_speech_settings_round_trip(database: Database) -> None:
     assert await repository.load() == _speech_settings(
         tts_voice="am_adam", tts_speed=1.1, max_turn_s=300
     )
+
+    gpu = _speech_settings(
+        stt_engine="whispercpp", stt_gpu_model="ggerganov/whisper.cpp/ggml-medium.en-q5_0.bin"
+    )
+    await repository.save(gpu)
+    assert await repository.load() == gpu
+
+
+async def test_speech_settings_saved_before_the_engine_choice_use_speaches(
+    database: Database,
+) -> None:
+    """Migration 0003 gives a row saved before it Speaches and no GPU choice (`""`, which the
+    service reads as `VT_STT_GPU_MODEL`); going back down drops both columns, and up again
+    works."""
+    with database.engine.begin() as connection:
+        command.downgrade(_alembic(connection), "0002")
+        columns = [row[1] for row in connection.execute(text("PRAGMA table_info(speech_settings)"))]
+        assert "stt_engine" not in columns
+        assert "stt_gpu_model" not in columns
+        connection.execute(
+            text(
+                "INSERT INTO speech_settings (id, stt_model, tts_model, tts_voice, tts_speed, "
+                "max_turn_s) VALUES (1, 'Systran/faster-whisper-small.en', "
+                "'speaches-ai/Kokoro-82M-v1.0-ONNX', 'am_adam', 1.1, 180)"
+            )
+        )
+
+    migrate(database.engine)
+
+    saved = await SqlSpeechSettingsRepository(database).load()
+    assert saved is not None
+    assert (saved.stt_engine, saved.stt_gpu_model) == ("openai", "")
+    assert saved == _speech_settings(
+        stt_model="Systran/faster-whisper-small.en",
+        stt_gpu_model="",
+        tts_voice="am_adam",
+        tts_speed=1.1,
+        max_turn_s=180,
+    )
+    with database.engine.begin() as connection:  # down and up again, with the row in it
+        command.downgrade(_alembic(connection), "0002")
+    migrate(database.engine)
+    assert await SqlSpeechSettingsRepository(database).load() == saved
 
 
 async def test_unreadable_speech_settings_fall_back(

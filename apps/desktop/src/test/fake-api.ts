@@ -67,12 +67,14 @@ export const ENVIRONMENT: Settings = {
 }
 
 const STT_DEFAULT = 'Systran/faster-distil-whisper-small.en'
+const STT_GPU_DEFAULT = 'ggerganov/whisper.cpp/ggml-small.en-q8_0.bin'
 const TTS_DEFAULT = 'speaches-ai/Kokoro-82M-v1.0-ONNX'
 
 const entry = (
   fields: Pick<Schemas['SpeechModel'], 'key' | 'kind' | 'model_id' | 'label' | 'approx_mb'> &
     Partial<Schemas['SpeechModel']>,
 ): Schemas['SpeechModel'] => ({
+  engine: 'openai',
   hint: 'A good balance.',
   english_only: true,
   state: 'available',
@@ -88,6 +90,10 @@ const entry = (
 export const SPEECH_MODELS: Schemas['SpeechModels'] = {
   recognition_manageable: true,
   voice_manageable: true,
+  engines: [
+    { engine: 'openai', running: true, manageable: true },
+    { engine: 'whispercpp', running: false, manageable: true },
+  ],
   last_error: null,
   models: [
     entry({
@@ -115,6 +121,26 @@ export const SPEECH_MODELS: Schemas['SpeechModels'] = {
       model_id: 'Systran/faster-whisper-tiny.en',
       label: 'Whisper tiny (English)',
       approx_mb: 75,
+    }),
+    entry({
+      key: 'ggml-small-en-q8',
+      kind: 'recognition',
+      engine: 'whispercpp',
+      model_id: STT_GPU_DEFAULT,
+      label: 'whisper.cpp small (English, q8)',
+      approx_mb: 250,
+      state: 'installed',
+      default: true,
+      selected: true,
+    }),
+    entry({
+      key: 'ggml-base-en-q5',
+      kind: 'recognition',
+      engine: 'whispercpp',
+      model_id: 'ggerganov/whisper.cpp/ggml-base.en-q5_1.bin',
+      label: 'whisper.cpp base (English, q5)',
+      approx_mb: 60,
+      state: 'installed',
     }),
     entry({
       key: 'kokoro',
@@ -187,6 +213,8 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
     settings: structuredClone(ENVIRONMENT),
     speechSettings: {
       stt_model: STT_DEFAULT,
+      stt_engine: 'openai',
+      stt_gpu_model: STT_GPU_DEFAULT,
       tts_model: TTS_DEFAULT,
       tts_voice: 'af_heart',
       tts_speed: 0.95,
@@ -207,6 +235,7 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
         model_ready: true,
         detail: null,
       },
+      recognition_engine: 'openai',
       synthesis: {
         base_url: 'http://localhost:8000/v1',
         model: 'speaches-ai/Kokoro-82M-v1.0-ONNX',
@@ -227,9 +256,11 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
       m.key === key ? { ...m, ...change } : m,
     )
   }
+  /** Each engine keeps its own selected recognition model, so only the target's engine moves. */
   const select = (kind: Schemas['SpeechKind'], modelId: string) => {
+    const engine = api.speechModels.models.find((m) => m.model_id === modelId)?.engine
     api.speechModels.models = api.speechModels.models.map((m) =>
-      m.kind === kind ? { ...m, selected: m.model_id === modelId } : m,
+      m.kind === kind && m.engine === engine ? { ...m, selected: m.model_id === modelId } : m,
     )
   }
   /** Each poll of the catalogue moves a running download on; the second one finishes it. */
@@ -249,7 +280,12 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
         api.speechSettings.pending = api.speechSettings.pending.filter(
           (id) => id !== model.model_id,
         )
-        const field = model.kind === 'recognition' ? 'stt_model' : 'tts_model'
+        const field =
+          model.kind === 'voice'
+            ? 'tts_model'
+            : model.engine === 'whispercpp'
+              ? 'stt_gpu_model'
+              : 'stt_model'
         api.speechSettings[field] = model.model_id
         select(model.kind, model.model_id)
       }
@@ -326,6 +362,7 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
         const body = sent.get(route)?.at(-1) as Schemas['SpeechSettings']
         api.speechSettings = { ...api.speechSettings, ...body, source: 'saved' }
         select('recognition', body.stt_model)
+        select('recognition', body.stt_gpu_model)
         select('voice', body.tts_model)
         return json(api.speechSettings)
       }

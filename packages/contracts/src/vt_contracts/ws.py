@@ -24,6 +24,7 @@ type ErrorCode = Literal[
     "no_speech",
     "audio_too_short",
     "speech_model_missing",
+    "speech_engine_unavailable",
 ]
 
 
