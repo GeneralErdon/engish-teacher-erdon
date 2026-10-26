@@ -56,7 +56,15 @@ describe('Speaking', () => {
   it('interrupts the tutor when the learner starts speaking', async () => {
     const { socket, user } = await openPractice()
     socket.emit(
-      { type: 'transcript.final', v: 1, turn_id: 't1', text: 'Hi', source: 'text', stt_ms: null },
+      {
+        type: 'transcript.final',
+        v: 1,
+        turn_id: 't1',
+        text: 'Hi',
+        source: 'text',
+        stt_ms: null,
+        cut: false,
+      },
       { type: 'assistant.text.delta', v: 1, turn_id: 't1', text: 'Hello' },
     )
 
@@ -94,6 +102,7 @@ describe('Speaking', () => {
       text: 'Hello',
       source: 'voice',
       stt_ms: 500,
+      cut: false,
     })
     expect(screen.queryByText(/I did not catch that/)).not.toBeInTheDocument()
   })
@@ -126,7 +135,15 @@ describe('Speaking', () => {
 const pcm = (samples = 2_400) => new Int16Array(samples).buffer
 
 const spokenTurn = (id = 't1'): ServerEvent[] => [
-  { type: 'transcript.final', v: 1, turn_id: id, text: 'Hi', source: 'text', stt_ms: null },
+  {
+    type: 'transcript.final',
+    v: 1,
+    turn_id: id,
+    text: 'Hi',
+    source: 'text',
+    stt_ms: null,
+    cut: false,
+  },
   { type: 'assistant.text.delta', v: 1, turn_id: id, text: 'Hello!' },
   { type: 'assistant.audio.started', v: 1, turn_id: id, sample_rate: 24_000 },
 ]
@@ -264,5 +281,46 @@ describe("The tutor's voice", () => {
     FakeSocket.last.emit({ type: 'session.ready', v: 1, level: 'B1', provider: 'P', model: 'm' })
     await user.type(screen.getByLabelText('Message'), 'Hi{Enter}')
     expect(FakePlayer.current).toBeUndefined() // no audio without a voice
+  })
+})
+
+describe('Speech settings', () => {
+  it('a cut turn says so', async () => {
+    const { socket } = await openPractice()
+    socket.emit({
+      type: 'transcript.final',
+      v: 1,
+      turn_id: 't1',
+      text: 'Hello',
+      source: 'voice',
+      stt_ms: 500,
+      cut: true,
+    })
+
+    expect(screen.getByText('Cut at the turn limit')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Allow longer turns' })).toHaveAttribute(
+      'href',
+      '/settings',
+    )
+  })
+
+  it('does not mention a limit on a turn that was not cut', async () => {
+    const { socket } = await openPractice()
+    socket.emit(...spokenTurn())
+
+    expect(screen.queryByText('Cut at the turn limit')).not.toBeInTheDocument()
+  })
+
+  it('the missing-model warning shows', async () => {
+    const { socket } = await openPractice()
+    socket.emit({
+      type: 'error',
+      v: 1,
+      code: 'speech_model_missing',
+      message: 'The speech model you chose is gone. Pick another in Settings → Voice.',
+      retryable: true,
+    })
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/speech model you chose is gone/)
   })
 })

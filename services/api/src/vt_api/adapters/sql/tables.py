@@ -3,7 +3,16 @@
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, LargeBinary, MetaData, String, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Float,
+    Integer,
+    LargeBinary,
+    MetaData,
+    String,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Named constraints, so later migrations can alter them on any engine.
@@ -57,4 +66,19 @@ class LearnerProfileRow(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     level: Mapped[str] = mapped_column(String(2))
     explanations: Mapped[str] = mapped_column(String(10))
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class SpeechSettingsRow(Base):
+    """Speech models, voice, speed and turn length. A single row."""
+
+    __tablename__ = "speech_settings"
+    __table_args__ = (CheckConstraint("id = 1", name="single_row"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    stt_model: Mapped[str] = mapped_column(String(200))
+    tts_model: Mapped[str] = mapped_column(String(200))
+    tts_voice: Mapped[str] = mapped_column(String(100))
+    tts_speed: Mapped[float] = mapped_column(Float)
+    max_turn_s: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = _updated_at()

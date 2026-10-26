@@ -7,37 +7,40 @@ from dataclasses import dataclass
 
 import anthropic
 import anyio
+import httpx2
 import openai
 from pydantic import HttpUrl
 
 from vt_api.adapters.chat_factory import SdkChatModelFactory
+from vt_api.adapters.model_files import HfModelFiles
 from vt_api.adapters.openai_stt import OpenAISpeechToText
 from vt_api.adapters.openai_tts import OpenAITextToSpeech
 from vt_api.adapters.secret_key import MasterKey, load_master_key, usable_keyring
+from vt_api.adapters.speaches import SpeachesServer
 from vt_api.adapters.sql.database import Database, open_database
 from vt_api.adapters.sql.learner_profile import SqlLearnerProfileRepository
 from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
+from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
 from vt_api.config import Settings
 from vt_api.domain.llm import environment_config
-from vt_api.ports.speech import SpeechToText, TextToSpeech
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
+from vt_api.services.speech import SpeechService
 from vt_contracts.learner import LearnerProfile
+from vt_contracts.speech import SpeechSettings
 
 logger = logging.getLogger(__name__)
 
-STT_TIMEOUT_S = 60.0
-"""A long turn on a slow CPU can take a while to transcribe."""
 TTS_TIMEOUT_S = 30.0
-"""Per read: the first sentence loads the voice model if the server unloaded it."""
+"""Per read (the first sentence loads the voice model if the server unloaded it), and the
+default for status calls; transcription sets its own."""
 
 
 @dataclass(frozen=True, slots=True)
 class Container:
     llm: LlmService
     learner: LearnerService
-    stt: SpeechToText
-    tts: TextToSpeech
+    speech: SpeechService
 
 
 def _open_database(settings: Settings) -> Database:
@@ -78,15 +81,32 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
                 max_retries=0,
             )
 
-        stt = OpenAISpeechToText(
-            speech_client(settings.stt_base_url, STT_TIMEOUT_S), settings.stt_model
+        stt = OpenAISpeechToText(speech_client(settings.stt_base_url, TTS_TIMEOUT_S))
+        tts = OpenAITextToSpeech(speech_client(settings.tts_base_url, TTS_TIMEOUT_S))
+        speaches_http = httpx2.AsyncClient(timeout=TTS_TIMEOUT_S)
+        stack.push_async_callback(speaches_http.aclose)
+        files = (
+            await anyio.to_thread.run_sync(HfModelFiles, settings.speech_models_dir)
+            if settings.speech_models_dir is not None
+            else None
         )
-        tts = OpenAITextToSpeech(
-            speech_client(settings.tts_base_url, TTS_TIMEOUT_S),
-            model=settings.tts_model,
-            voice=settings.tts_voice,
-            speed=settings.tts_speed,
+        speech = SpeechService(
+            repository=SqlSpeechSettingsRepository(database),
+            stt=stt,
+            tts=tts,
+            recognition_server=SpeachesServer(speaches_http, str(settings.stt_base_url)),
+            voice_server=SpeachesServer(speaches_http, str(settings.tts_base_url)),
+            files=files,
+            defaults=SpeechSettings(
+                stt_model=settings.stt_model,
+                tts_model=settings.tts_model,
+                tts_voice=settings.tts_voice,
+                tts_speed=settings.tts_speed,
+                max_turn_s=settings.max_turn_s,
+            ),
         )
+        # Pushed last, so it runs first: a running download stops before the clients close.
+        stack.push_async_callback(speech.aclose)
         environment = environment_config(
             kind=settings.llm_provider,
             base_url=str(settings.llm_base_url),
@@ -106,6 +126,5 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
                 ),
                 native_language=settings.learner_l1,
             ),
-            stt=stt,
-            tts=tts,
+            speech=speech,
         )

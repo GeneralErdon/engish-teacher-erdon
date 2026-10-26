@@ -34,7 +34,7 @@ async def stt(speaches: Speaches) -> AsyncIterator[OpenAISpeechToText]:
     client = openai.AsyncOpenAI(
         api_key="none", base_url="http://localhost:8000/v1", http_client=http, max_retries=0
     )
-    yield OpenAISpeechToText(client, MODEL)
+    yield OpenAISpeechToText(client)
     await http.aclose()
 
 
@@ -46,7 +46,7 @@ def _models(*ids: str) -> httpx2.Response:
 async def test_transcribes_english_wav(stt: OpenAISpeechToText, speaches: Speaches) -> None:
     speaches.handler = lambda _request: httpx2.Response(200, json={"text": " I went home. "})
 
-    assert await stt.transcribe(b"RIFF....") == "I went home."
+    assert await stt.transcribe(b"RIFF....", MODEL, 30.0) == "I went home."
 
     request = speaches.requests[-1]
     assert str(request.url) == "http://localhost:8000/v1/audio/transcriptions"
@@ -54,6 +54,15 @@ async def test_transcribes_english_wav(stt: OpenAISpeechToText, speaches: Speach
     assert MODEL.encode() in body
     assert b'name="language"\r\n\r\nen' in body
     assert b'filename="speech.wav"' in body
+
+
+async def test_sends_the_per_call_timeout(stt: OpenAISpeechToText, speaches: Speaches) -> None:
+    speaches.handler = lambda _request: httpx2.Response(200, json={"text": "Hi."})
+
+    await stt.transcribe(b"RIFF....", MODEL, 47.0)
+
+    timeout = speaches.requests[-1].extensions["timeout"]
+    assert timeout["read"] == 47.0
 
 
 @pytest.mark.parametrize(
@@ -69,7 +78,7 @@ async def test_failures_become_provider_errors(
     speaches.handler = failure
 
     with pytest.raises(ProviderError) as error:
-        await stt.transcribe(b"RIFF....")
+        await stt.transcribe(b"RIFF....", MODEL, 30.0)
 
     assert error.value.reason == reason
 
@@ -77,7 +86,7 @@ async def test_failures_become_provider_errors(
 async def test_ready(stt: OpenAISpeechToText, speaches: Speaches) -> None:
     speaches.handler = lambda _request: _models("other", MODEL)
 
-    status = await stt.status()
+    status = await stt.status(MODEL)
 
     assert (status.reachable, status.model_ready, status.detail) == (True, True, None)
     assert status.base_url == "http://localhost:8000/v1"
@@ -86,7 +95,7 @@ async def test_ready(stt: OpenAISpeechToText, speaches: Speaches) -> None:
 async def test_model_not_downloaded(stt: OpenAISpeechToText, speaches: Speaches) -> None:
     speaches.handler = lambda _request: _models("other")
 
-    status = await stt.status()
+    status = await stt.status(MODEL)
 
     assert (status.reachable, status.model_ready) == (True, False)
     assert status.detail == f"The model {MODEL} is not downloaded."
@@ -98,7 +107,7 @@ async def test_server_down(stt: OpenAISpeechToText, speaches: Speaches) -> None:
 
     speaches.handler = refuse
 
-    status = await stt.status()
+    status = await stt.status(MODEL)
 
     assert (status.reachable, status.model_ready) == (False, False)
     assert status.detail == "Could not connect to http://localhost:8000/v1."

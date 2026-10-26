@@ -367,6 +367,44 @@
         ],
         "type": "string"
       },
+      "DownloadProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "done_bytes": {
+            "title": "Done Bytes",
+            "type": "integer"
+          },
+          "total_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Bytes"
+          }
+        },
+        "required": [
+          "done_bytes",
+          "total_bytes"
+        ],
+        "title": "DownloadProgress",
+        "type": "object"
+      },
+      "DownloadRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "activate": {
+            "default": false,
+            "title": "Activate",
+            "type": "boolean"
+          }
+        },
+        "title": "DownloadRequest",
+        "type": "object"
+      },
       "ErrorCode": {
         "enum": [
           "bad_event",
@@ -376,7 +414,7 @@
           "tts_failed",
           "no_speech",
           "audio_too_short",
-          "audio_too_long"
+          "speech_model_missing"
         ],
         "type": "string"
       },
@@ -644,6 +682,14 @@
         ],
         "title": "ModelList",
         "type": "object"
+      },
+      "ModelState": {
+        "enum": [
+          "installed",
+          "downloading",
+          "available"
+        ],
+        "type": "string"
       },
       "ModelStatus": {
         "additionalProperties": false,
@@ -1067,6 +1113,240 @@
         "title": "SessionUpdate",
         "type": "object"
       },
+      "SpeechKind": {
+        "enum": [
+          "recognition",
+          "voice"
+        ],
+        "type": "string"
+      },
+      "SpeechModel": {
+        "additionalProperties": false,
+        "properties": {
+          "approx_mb": {
+            "title": "Approx Mb",
+            "type": "integer"
+          },
+          "default": {
+            "title": "Default",
+            "type": "boolean"
+          },
+          "download": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DownloadProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "english_only": {
+            "title": "English Only",
+            "type": "boolean"
+          },
+          "from_configuration": {
+            "title": "From Configuration",
+            "type": "boolean"
+          },
+          "hint": {
+            "title": "Hint",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SpeechKind"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "ms_per_audio_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ms Per Audio S"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ModelState"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "model_id",
+          "label",
+          "hint",
+          "approx_mb",
+          "english_only",
+          "state",
+          "download",
+          "default",
+          "selected",
+          "from_configuration",
+          "ms_per_audio_s"
+        ],
+        "title": "SpeechModel",
+        "type": "object"
+      },
+      "SpeechModels": {
+        "additionalProperties": false,
+        "description": "`GET /v1/speech/models`.",
+        "properties": {
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/SpeechModel"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "recognition_manageable": {
+            "title": "Recognition Manageable",
+            "type": "boolean"
+          },
+          "voice_manageable": {
+            "title": "Voice Manageable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "models",
+          "recognition_manageable",
+          "voice_manageable",
+          "last_error"
+        ],
+        "title": "SpeechModels",
+        "type": "object"
+      },
+      "SpeechSettings": {
+        "additionalProperties": false,
+        "description": "Body of `PUT /v1/speech/settings`.",
+        "properties": {
+          "max_turn_s": {
+            "maximum": 300.0,
+            "minimum": 30.0,
+            "title": "Max Turn S",
+            "type": "integer"
+          },
+          "stt_model": {
+            "title": "Stt Model",
+            "type": "string"
+          },
+          "tts_model": {
+            "title": "Tts Model",
+            "type": "string"
+          },
+          "tts_speed": {
+            "maximum": 1.3,
+            "minimum": 0.7,
+            "title": "Tts Speed",
+            "type": "number"
+          },
+          "tts_voice": {
+            "title": "Tts Voice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stt_model",
+          "tts_model",
+          "tts_voice",
+          "tts_speed",
+          "max_turn_s"
+        ],
+        "title": "SpeechSettings",
+        "type": "object"
+      },
+      "SpeechSettingsView": {
+        "additionalProperties": false,
+        "properties": {
+          "max_turn_s": {
+            "maximum": 300.0,
+            "minimum": 30.0,
+            "title": "Max Turn S",
+            "type": "integer"
+          },
+          "missing": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SpeechKind"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "pending": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Pending",
+            "type": "array"
+          },
+          "source": {
+            "enum": [
+              "environment",
+              "saved"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "stt_model": {
+            "title": "Stt Model",
+            "type": "string"
+          },
+          "tts_model": {
+            "title": "Tts Model",
+            "type": "string"
+          },
+          "tts_speed": {
+            "maximum": 1.3,
+            "minimum": 0.7,
+            "title": "Tts Speed",
+            "type": "number"
+          },
+          "tts_voice": {
+            "title": "Tts Voice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stt_model",
+          "tts_model",
+          "tts_voice",
+          "tts_speed",
+          "max_turn_s",
+          "source"
+        ],
+        "title": "SpeechSettingsView",
+        "type": "object"
+      },
       "SpeechStatus": {
         "additionalProperties": false,
         "properties": {
@@ -1088,6 +1368,11 @@
         "additionalProperties": false,
         "description": "What the learner said (or typed) in this turn, as the server will use it.",
         "properties": {
+          "cut": {
+            "default": false,
+            "title": "Cut",
+            "type": "boolean"
+          },
           "source": {
             "enum": [
               "text",
@@ -1135,7 +1420,8 @@
           "turn_id",
           "text",
           "source",
-          "stt_ms"
+          "stt_ms",
+          "cut"
         ],
         "title": "TranscriptFinal",
         "type": "object"
@@ -1237,6 +1523,83 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "Voice": {
+        "additionalProperties": false,
+        "properties": {
+          "accent": {
+            "anyOf": [
+              {
+                "enum": [
+                  "american",
+                  "british"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accent"
+          },
+          "gender": {
+            "anyOf": [
+              {
+                "enum": [
+                  "female",
+                  "male"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gender"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "accent",
+          "gender"
+        ],
+        "title": "Voice",
+        "type": "object"
+      },
+      "VoicePreview": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "speed": {
+            "maximum": 1.3,
+            "minimum": 0.7,
+            "title": "Speed",
+            "type": "number"
+          },
+          "voice": {
+            "title": "Voice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "voice",
+          "speed"
+        ],
+        "title": "VoicePreview",
         "type": "object"
       },
       "WireProtocol": {
@@ -1531,9 +1894,250 @@
         ]
       }
     },
+    "/v1/speech/models": {
+      "get": {
+        "operationId": "get_models_v1_speech_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechModels"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Models",
+        "tags": [
+          "speech"
+        ]
+      }
+    },
+    "/v1/speech/models/{key}": {
+      "delete": {
+        "operationId": "uninstall_model_v1_speech_models__key__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Uninstall Model",
+        "tags": [
+          "speech"
+        ]
+      }
+    },
+    "/v1/speech/models/{key}/download": {
+      "delete": {
+        "description": "Stops the download of `key`; nothing to do once it has ended, and 409 while another model\ndownloads.",
+        "operationId": "cancel_download_v1_speech_models__key__download_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Download",
+        "tags": [
+          "speech"
+        ]
+      },
+      "post": {
+        "description": "Starts the download in the background; poll `GET /models` for its progress.",
+        "operationId": "download_model_v1_speech_models__key__download_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechModels"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Model",
+        "tags": [
+          "speech"
+        ]
+      }
+    },
+    "/v1/speech/preview": {
+      "post": {
+        "description": "A short sentence in the chosen voice, as a WAV.",
+        "operationId": "preview_voice_v1_speech_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoicePreview"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "audio/wav": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Voice",
+        "tags": [
+          "speech"
+        ]
+      }
+    },
+    "/v1/speech/settings": {
+      "get": {
+        "operationId": "get_settings_v1_speech_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Settings",
+        "tags": [
+          "speech"
+        ]
+      },
+      "put": {
+        "operationId": "save_settings_v1_speech_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeechSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Settings",
+        "tags": [
+          "speech"
+        ]
+      }
+    },
     "/v1/speech/status": {
       "get": {
-        "description": "Whether each speech server answers and has its model: speech-to-text for the learner's\nvoice, text-to-speech for the tutor's.",
+        "description": "Whether each speech server answers and has the model a conversation would use: the\nselected one, or the default while the selected one is not installed. Speech-to-text for\nthe learner's voice, text-to-speech for the tutor's.",
         "operationId": "speech_status_v1_speech_status_get",
         "responses": {
           "200": {
@@ -1548,6 +2152,52 @@
           }
         },
         "summary": "Speech Status",
+        "tags": [
+          "speech"
+        ]
+      }
+    },
+    "/v1/speech/voices": {
+      "get": {
+        "operationId": "get_voices_v1_speech_voices_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "model",
+            "required": true,
+            "schema": {
+              "title": "Model",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Voice"
+                  },
+                  "title": "Response Get Voices V1 Speech Voices Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Voices",
         "tags": [
           "speech"
         ]

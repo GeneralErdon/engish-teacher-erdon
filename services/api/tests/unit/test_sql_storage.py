@@ -22,9 +22,11 @@ from vt_api.adapters.sql.database import (
 )
 from vt_api.adapters.sql.learner_profile import SqlLearnerProfileRepository
 from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
+from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
 from vt_api.adapters.sql.tables import Base
 from vt_api.domain.llm import LlmConfig, ProviderConfig
 from vt_contracts.learner import LearnerProfile
+from vt_contracts.speech import SpeechSettings
 
 # Built from parts so secret scanners do not flag a fake key.
 FAKE_KEY = "sk-" + "fake" * 3 + "3456"
@@ -231,3 +233,43 @@ async def test_learner_profile_round_trip(database: Database) -> None:
     await repository.save(LearnerProfile(level="C1", explanations="native"))
 
     assert await repository.load() == LearnerProfile(level="C1", explanations="native")
+
+
+# ---------------------------------------------------------------- speech settings
+
+
+def _speech_settings(**changes: object) -> SpeechSettings:
+    values: dict[str, object] = {
+        "stt_model": "Systran/faster-distil-whisper-small.en",
+        "tts_model": "speaches-ai/Kokoro-82M-v1.0-ONNX",
+        "tts_voice": "af_heart",
+        "tts_speed": 0.95,
+        "max_turn_s": 120,
+    }
+    return SpeechSettings.model_validate(values | changes)
+
+
+async def test_speech_settings_round_trip(database: Database) -> None:
+    repository = SqlSpeechSettingsRepository(database)
+    assert await repository.load() is None
+
+    await repository.save(_speech_settings())
+    await repository.save(_speech_settings(tts_voice="am_adam", tts_speed=1.1, max_turn_s=300))
+
+    assert await repository.load() == _speech_settings(
+        tts_voice="am_adam", tts_speed=1.1, max_turn_s=300
+    )
+
+
+async def test_unreadable_speech_settings_fall_back(
+    database: Database, caplog: pytest.LogCaptureFixture
+) -> None:
+    repository = SqlSpeechSettingsRepository(database)
+    await repository.save(_speech_settings())
+    with database.engine.begin() as connection:
+        connection.execute(text("UPDATE speech_settings SET max_turn_s = 5"))
+
+    with caplog.at_level(logging.WARNING):
+        assert await repository.load() is None
+
+    assert "unreadable saved speech settings" in caplog.text

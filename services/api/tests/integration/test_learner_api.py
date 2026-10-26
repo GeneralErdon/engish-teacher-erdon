@@ -5,14 +5,13 @@ import httpx2
 import pytest
 from sqlalchemy import text
 
-from vt_api.adapters.openai_stt import OpenAISpeechToText
-from vt_api.adapters.openai_tts import OpenAITextToSpeech
 from vt_api.adapters.sql.database import Database
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.main import create_app
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
+from vt_api.services.speech import SpeechService
 from vt_contracts.learner import LearnerProfileView
 
 
@@ -21,8 +20,7 @@ async def client(learner_service: LearnerService) -> AsyncIterator[httpx2.AsyncC
     container = Container(
         llm=create_autospec(LlmService, instance=True),
         learner=learner_service,
-        stt=create_autospec(OpenAISpeechToText, instance=True),
-        tts=create_autospec(OpenAITextToSpeech, instance=True),
+        speech=create_autospec(SpeechService, instance=True),
     )
     app = create_app(Settings(_env_file=None), container=container)
     async with httpx2.AsyncClient(

@@ -61,8 +61,13 @@ class Settings(BaseSettings):
     tts_base_url: HttpUrl = HttpUrl("http://tts:8000/v1")
     tts_model: str = "speaches-ai/Kokoro-82M-v1.0-ONNX"
     tts_voice: str = "af_heart"
-    # Kokoro's range. Slightly slower than normal helps learners.
-    tts_speed: float = Field(default=0.95, ge=0.5, le=2.0)
+    # Slightly slower than normal helps learners. Same range as the Settings screen.
+    tts_speed: float = Field(default=0.95, ge=0.7, le=1.3)
+    # Longest learner turn kept, in seconds (the rest is cut).
+    max_turn_s: int = Field(default=120, ge=30, le=300)
+    # The Hugging Face cache folder shared with Speaches: the api downloads and removes speech
+    # models there, and creates it if missing. Unset: the model lists are read-only.
+    speech_models_dir: Path | None = None
 
     # Pronunciation scoring
     pron_base_url: HttpUrl = HttpUrl("http://pron:8001")

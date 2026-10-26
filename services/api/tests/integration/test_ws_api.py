@@ -2,6 +2,7 @@
 HTTP transport (OpenAI-compatible servers answering with SSE streams, JSON and raw PCM)."""
 
 import json
+from unittest.mock import create_autospec
 
 import httpx2
 import openai
@@ -14,14 +15,18 @@ from starlette.websockets import WebSocketDisconnect
 from vt_api.adapters.chat_factory import SdkChatModelFactory
 from vt_api.adapters.openai_stt import OpenAISpeechToText
 from vt_api.adapters.openai_tts import OpenAITextToSpeech
+from vt_api.adapters.speaches import SpeachesServer
 from vt_api.adapters.sql.database import Database
 from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
+from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.domain.llm import environment_config
 from vt_api.main import create_app
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
+from vt_api.services.speech import SpeechService
+from vt_contracts.speech import SpeechSettings
 from vt_contracts.ws import SERVER_EVENT, ServerEvent, TurnMetrics
 
 VOICE = b"\x01\x00" * 2_400  # 0.1 s of PCM16 at 24 kHz
@@ -93,11 +98,27 @@ def client(database: Database, learner_service: LearnerService) -> TestClient:
             max_retries=0,
         )
 
+    stt = OpenAISpeechToText(speech_client("http://stt/v1"))
+    tts = OpenAITextToSpeech(speech_client("http://tts/v1"))
+    speech = SpeechService(
+        repository=SqlSpeechSettingsRepository(database),
+        stt=stt,
+        tts=tts,
+        recognition_server=create_autospec(SpeachesServer, instance=True),
+        voice_server=create_autospec(SpeachesServer, instance=True),
+        files=None,
+        defaults=SpeechSettings(
+            stt_model="whisper",
+            tts_model="kokoro",
+            tts_voice="af_heart",
+            tts_speed=1.0,
+            max_turn_s=120,
+        ),
+    )
     container = Container(
         llm=llm,
         learner=learner_service,
-        stt=OpenAISpeechToText(speech_client("http://stt/v1"), "whisper"),
-        tts=OpenAITextToSpeech(speech_client("http://tts/v1"), "kokoro", "af_heart", 1.0),
+        speech=speech,
     )
     return TestClient(create_app(Settings(_env_file=None), container=container))
 
@@ -157,6 +178,7 @@ def test_a_spoken_turn(client: TestClient) -> None:
         "text": "I have went to the beach",
         "source": "voice",
         "stt_ms": 0,
+        "cut": False,
     }
 
 

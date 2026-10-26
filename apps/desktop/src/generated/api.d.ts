@@ -127,6 +127,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/speech/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Models */
+        get: operations["get_models_v1_speech_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/speech/models/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Uninstall Model */
+        delete: operations["uninstall_model_v1_speech_models__key__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/speech/models/{key}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Download Model
+         * @description Starts the download in the background; poll `GET /models` for its progress.
+         */
+        post: operations["download_model_v1_speech_models__key__download_post"];
+        /**
+         * Cancel Download
+         * @description Stops the download of `key`; nothing to do once it has ended, and 409 while another model
+         *     downloads.
+         */
+        delete: operations["cancel_download_v1_speech_models__key__download_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/speech/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Voice
+         * @description A short sentence in the chosen voice, as a WAV.
+         */
+        post: operations["preview_voice_v1_speech_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/speech/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Settings */
+        get: operations["get_settings_v1_speech_settings_get"];
+        /** Save Settings */
+        put: operations["save_settings_v1_speech_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/speech/status": {
         parameters: {
             query?: never;
@@ -136,10 +233,28 @@ export interface paths {
         };
         /**
          * Speech Status
-         * @description Whether each speech server answers and has its model: speech-to-text for the learner's
-         *     voice, text-to-speech for the tutor's.
+         * @description Whether each speech server answers and has the model a conversation would use: the
+         *     selected one, or the default while the selected one is not installed. Speech-to-text for
+         *     the learner's voice, text-to-speech for the tutor's.
          */
         get: operations["speech_status_v1_speech_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/speech/voices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Voices */
+        get: operations["get_voices_v1_speech_voices_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -311,8 +426,23 @@ export interface components {
         };
         /** @enum {string} */
         CorrectionKind: "grammar" | "vocabulary" | "spelling" | "naturalness";
+        /** DownloadProgress */
+        DownloadProgress: {
+            /** Done Bytes */
+            done_bytes: number;
+            /** Total Bytes */
+            total_bytes: number | null;
+        };
+        /** DownloadRequest */
+        DownloadRequest: {
+            /**
+             * Activate
+             * @default false
+             */
+            activate: boolean;
+        };
         /** @enum {string} */
-        ErrorCode: "bad_event" | "not_started" | "llm_failed" | "stt_failed" | "tts_failed" | "no_speech" | "audio_too_short" | "audio_too_long";
+        ErrorCode: "bad_event" | "not_started" | "llm_failed" | "stt_failed" | "tts_failed" | "no_speech" | "audio_too_short" | "speech_model_missing";
         /** ErrorEvent */
         ErrorEvent: {
             code: components["schemas"]["ErrorCode"];
@@ -458,6 +588,8 @@ export interface components {
             /** Models */
             models: string[];
         };
+        /** @enum {string} */
+        ModelState: "installed" | "downloading" | "available";
         /**
          * ModelStatus
          * @description Whether one speech server answers and has its model.
@@ -633,6 +765,92 @@ export interface components {
              */
             v: 1;
         };
+        /** @enum {string} */
+        SpeechKind: "recognition" | "voice";
+        /** SpeechModel */
+        SpeechModel: {
+            /** Approx Mb */
+            approx_mb: number;
+            /** Default */
+            default: boolean;
+            download: components["schemas"]["DownloadProgress"] | null;
+            /** English Only */
+            english_only: boolean;
+            /** From Configuration */
+            from_configuration: boolean;
+            /** Hint */
+            hint: string;
+            /** Key */
+            key: string;
+            kind: components["schemas"]["SpeechKind"];
+            /** Label */
+            label: string;
+            /** Model Id */
+            model_id: string;
+            /** Ms Per Audio S */
+            ms_per_audio_s: number | null;
+            /** Selected */
+            selected: boolean;
+            state: components["schemas"]["ModelState"];
+        };
+        /**
+         * SpeechModels
+         * @description `GET /v1/speech/models`.
+         */
+        SpeechModels: {
+            /** Last Error */
+            last_error: string | null;
+            /** Models */
+            models: components["schemas"]["SpeechModel"][];
+            /** Recognition Manageable */
+            recognition_manageable: boolean;
+            /** Voice Manageable */
+            voice_manageable: boolean;
+        };
+        /**
+         * SpeechSettings
+         * @description Body of `PUT /v1/speech/settings`.
+         */
+        SpeechSettings: {
+            /** Max Turn S */
+            max_turn_s: number;
+            /** Stt Model */
+            stt_model: string;
+            /** Tts Model */
+            tts_model: string;
+            /** Tts Speed */
+            tts_speed: number;
+            /** Tts Voice */
+            tts_voice: string;
+        };
+        /** SpeechSettingsView */
+        SpeechSettingsView: {
+            /** Max Turn S */
+            max_turn_s: number;
+            /**
+             * Missing
+             * @default []
+             */
+            missing: components["schemas"]["SpeechKind"][];
+            /**
+             * Pending
+             * @default []
+             */
+            pending: string[];
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "environment" | "saved";
+            /** Stt Model */
+            stt_model: string;
+            /** Tts Model */
+            tts_model: string;
+            /** Tts Speed */
+            tts_speed: number;
+            /** Tts Voice */
+            tts_voice: string;
+        };
         /** SpeechStatus */
         SpeechStatus: {
             recognition: components["schemas"]["ModelStatus"];
@@ -643,6 +861,11 @@ export interface components {
          * @description What the learner said (or typed) in this turn, as the server will use it.
          */
         TranscriptFinal: {
+            /**
+             * Cut
+             * @default false
+             */
+            cut: boolean;
             /**
              * Source
              * @enum {string}
@@ -712,6 +935,26 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** Voice */
+        Voice: {
+            /** Accent */
+            accent: ("american" | "british") | null;
+            /** Gender */
+            gender: ("female" | "male") | null;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** VoicePreview */
+        VoicePreview: {
+            /** Model */
+            model: string;
+            /** Speed */
+            speed: number;
+            /** Voice */
+            voice: string;
         };
         /** @enum {string} */
         WireProtocol: "openai" | "ollama" | "anthropic";
@@ -963,6 +1206,205 @@ export interface operations {
             };
         };
     };
+    get_models_v1_speech_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechModels"];
+                };
+            };
+        };
+    };
+    uninstall_model_v1_speech_models__key__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_model_v1_speech_models__key__download_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DownloadRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechModels"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_download_v1_speech_models__key__download_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_voice_v1_speech_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoicePreview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/wav": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_settings_v1_speech_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechSettingsView"];
+                };
+            };
+        };
+    };
+    save_settings_v1_speech_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpeechSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     speech_status_v1_speech_status_get: {
         parameters: {
             query?: never;
@@ -979,6 +1421,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpeechStatus"];
+                };
+            };
+        };
+    };
+    get_voices_v1_speech_voices_get: {
+        parameters: {
+            query: {
+                model: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Voice"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

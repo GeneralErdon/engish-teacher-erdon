@@ -17,15 +17,17 @@ from typing import Literal, assert_never
 
 from vt_api.domain.audio import duration_s, to_wav
 from vt_api.domain.llm import PROVIDERS, ChatMessage, ProviderError
+from vt_api.domain.speech import SessionSpeech, VoiceChoice
 from vt_api.ports.llm import ChatModel
-from vt_api.ports.speech import SpeechToText, TextToSpeech
 from vt_api.realtime.sentences import SentenceSplitter, speakable
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
+from vt_api.services.speech import SpeechService
 from vt_api.teacher.conversation import correction_messages, reply_messages
 from vt_api.teacher.corrections import CorrectionParseError, parse_correction
-from vt_contracts.audio import OUTPUT_SAMPLE_RATE_HZ
+from vt_contracts.audio import INPUT_SAMPLE_RATE_HZ, OUTPUT_SAMPLE_RATE_HZ, SAMPLE_WIDTH_BYTES
 from vt_contracts.learner import LearnerProfile
+from vt_contracts.speech import SpeechKind
 from vt_contracts.ws import (
     AssistantAudioDone,
     AssistantAudioStarted,
@@ -57,8 +59,11 @@ HISTORY_LIMIT = 20
 
 MIN_SPEECH_S = 0.3
 """Shorter recordings are accidental clicks, not speech."""
-MAX_SPEECH_S = 60.0
-"""Bounds the memory one connection can use; longer turns are not conversation."""
+
+_MISSING: dict[SpeechKind, str] = {
+    "recognition": "speech recognition",
+    "voice": "the tutor's voice",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +71,7 @@ class _Started:
     model: ChatModel
     profile: LearnerProfile
     topic: str | None
+    speech: SessionSpeech
 
 
 class ConversationSession:
@@ -76,16 +82,14 @@ class ConversationSession:
         send_audio: SendAudio,
         llm: LlmService,
         learner: LearnerService,
-        stt: SpeechToText,
-        tts: TextToSpeech,
+        speech: SpeechService,
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self._send = send
         self._send_audio = send_audio
         self._llm = llm
         self._learner = learner
-        self._stt = stt
-        self._tts = tts
+        self._speech = speech
         self._clock = clock
         self._started: _Started | None = None
         self._speak = False
@@ -95,7 +99,7 @@ class ConversationSession:
         self._background: set[asyncio.Task[None]] = set()
         """Corrections and transcriptions: they outlive interruptions, not the session."""
         self._audio = bytearray()
-        self._audio_overflow = False
+        self._audio_cut = False
 
     async def handle(self, event: ClientEvent) -> bool:
         """Apply one client event. `False` once the session is over."""
@@ -121,47 +125,62 @@ class ConversationSession:
     async def _start(self, topic: str | None) -> None:
         model, provider = await self._llm.active_chat()
         profile = await self._learner.profile()
-        self._started = _Started(model, profile, topic)
+        speech = await self._speech.for_session()
+        self._started = _Started(model, profile, topic, speech)
         await self._send(
             SessionReady(
                 level=profile.level, provider=PROVIDERS[provider.kind].label, model=provider.model
             )
         )
+        for kind in speech.missing:
+            await self._error(
+                "speech_model_missing",
+                f"The chosen model for {_MISSING[kind]} is not installed: the default is used "
+                "meanwhile. Download it, or pick another, in Settings → Voice.",
+            )
 
     def audio(self, chunk: bytes) -> None:
-        """Buffer microphone audio until `input.commit`."""
-        if duration_s(len(self._audio) + len(chunk)) > MAX_SPEECH_S:
-            self._audio_overflow = True
-            return
+        """Buffer microphone audio until `input.commit`, up to the longest turn; the rest is
+        dropped and the turn is reported as cut."""
+        limit_s = (
+            self._started.speech.max_turn_s
+            if self._started is not None
+            else self._speech.default_max_turn_s
+        )
+        room = int(limit_s * INPUT_SAMPLE_RATE_HZ) * SAMPLE_WIDTH_BYTES - len(self._audio)
+        if len(chunk) > room:
+            # The limit in bytes is whole samples: trimming to it ends the turn on one.
+            self._audio_cut = True
+            chunk = chunk[: max(room, 0)]
         self._audio.extend(chunk)
 
     async def _commit_audio(self) -> None:
-        pcm, overflow = bytes(self._audio), self._audio_overflow
+        pcm, cut = bytes(self._audio), self._audio_cut
         self._audio.clear()
-        self._audio_overflow = False
+        self._audio_cut = False
         if self._started is None:
             await self._not_started()
             return
-        if overflow:
-            await self._error("audio_too_long", f"Keep each turn under {MAX_SPEECH_S:.0f} s.")
-        elif duration_s(len(pcm)) < MIN_SPEECH_S:
+        if duration_s(len(pcm)) < MIN_SPEECH_S:
             await self._error(
                 "audio_too_short", "Too short: press the mic, speak, then press it again."
             )
         else:
-            self._track(asyncio.create_task(self._run_voice(pcm)))
+            self._track(asyncio.create_task(self._run_voice(self._started, pcm, cut)))
 
-    async def _run_voice(self, pcm: bytes) -> None:
+    async def _run_voice(self, started: _Started, pcm: bytes, cut: bool) -> None:
         since = self._clock()
         try:
-            text = await self._stt.transcribe(to_wav(pcm))
+            text = await self._speech.transcribe(
+                to_wav(pcm), duration_s(len(pcm)), started.speech.stt_model
+            )
         except ProviderError as error:
             await self._error("stt_failed", f"Speech recognition failed. {error.message}")
             return
         if not text:
             await self._error("no_speech", "I did not catch that. Try again, closer to the mic.")
             return
-        await self.learner_said(text, "voice", stt_ms=self._elapsed_ms(since))
+        await self.learner_said(text, "voice", stt_ms=self._elapsed_ms(since), cut=cut)
 
     async def _not_started(self) -> None:
         await self._send(
@@ -176,7 +195,11 @@ class ConversationSession:
         task.add_done_callback(self._background.discard)
 
     async def learner_said(
-        self, text: str, source: Literal["text", "voice"], stt_ms: int | None = None
+        self,
+        text: str,
+        source: Literal["text", "voice"],
+        stt_ms: int | None = None,
+        cut: bool = False,
     ) -> None:
         """Start a turn: interrupt the tutor, then reply and correct in parallel."""
         if self._started is None:
@@ -187,7 +210,9 @@ class ConversationSession:
         turn_id = f"t{self._turns}"
         started_at = self._clock()
         self._history.append(ChatMessage("user", text))
-        await self._send(TranscriptFinal(turn_id=turn_id, text=text, source=source, stt_ms=stt_ms))
+        await self._send(
+            TranscriptFinal(turn_id=turn_id, text=text, source=source, stt_ms=stt_ms, cut=cut)
+        )
 
         self._reply = asyncio.create_task(self._run_reply(self._started, turn_id, started_at))
         self._track(
@@ -213,7 +238,12 @@ class ConversationSession:
         messages = reply_messages(self._history[-HISTORY_LIMIT:], started.profile, started.topic)
         speaker = (
             _Speaker(
-                self._tts, self._send, self._send_audio, turn_id, lambda: self._elapsed_ms(since)
+                self._speech,
+                started.speech.voice,
+                self._send,
+                self._send_audio,
+                turn_id,
+                lambda: self._elapsed_ms(since),
             )
             if self._speak
             else None
@@ -286,13 +316,15 @@ class _Speaker:
 
     def __init__(
         self,
-        tts: TextToSpeech,
+        speech: SpeechService,
+        voice: VoiceChoice,
         send: Send,
         send_audio: SendAudio,
         turn_id: str,
         elapsed_ms: Callable[[], int],
     ) -> None:
-        self._tts = tts
+        self._speech = speech
+        self._voice = voice
         self._send = send
         self._send_audio = send_audio
         self._turn_id = turn_id
@@ -322,7 +354,7 @@ class _Speaker:
         try:
             while (sentence := await self._queue.get()) is not None:
                 if text := speakable(sentence):
-                    async for pcm in self._tts.synthesize(text):
+                    async for pcm in self._speech.synthesize(text, self._voice):
                         await self._audio(pcm)
         except ProviderError as error:
             # The reply goes on as text only.

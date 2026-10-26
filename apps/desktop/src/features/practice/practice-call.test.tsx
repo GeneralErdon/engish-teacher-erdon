@@ -51,7 +51,15 @@ async function startCall() {
 /** The tutor answers turn `id` out loud. */
 function tutorSpeaks(socket: FakeSocket, id = 't1', text = 'Hi there') {
   socket.emit(
-    { type: 'transcript.final', v: 1, turn_id: id, text: 'Hello', source: 'voice', stt_ms: 400 },
+    {
+      type: 'transcript.final',
+      v: 1,
+      turn_id: id,
+      text: 'Hello',
+      source: 'voice',
+      stt_ms: 400,
+      cut: false,
+    },
     { type: 'assistant.text.delta', v: 1, turn_id: id, text },
     { type: 'assistant.audio.started', v: 1, turn_id: id, sample_rate: 24_000 },
   )
@@ -126,6 +134,7 @@ describe('Call mode', () => {
       text: 'Hello',
       source: 'voice',
       stt_ms: 400,
+      cut: false,
     })
 
     expect(dialog.getByText('Thinking…')).toBeInTheDocument()
@@ -364,5 +373,11 @@ describe('transcription state', () => {
   it('ends with a speech error, not with others', () => {
     expect(reducer(start, error('no_speech')).transcribing).toBe(false)
     expect(reducer(start, error('tts_failed')).transcribing).toBe(true)
+  })
+
+  it('ends with audio_too_long, which an api before cut turns (v0.1.0) still sends', () => {
+    const tooLong = { ...error('no_speech'), code: 'audio_too_long' } as unknown as ServerEvent
+
+    expect(reducer(start, tooLong).transcribing).toBe(false)
   })
 })

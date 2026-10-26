@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -60,3 +62,22 @@ def test_empty_values_mean_default(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert settings.ui_dir is None
     assert settings.port == 8080
+
+
+@pytest.mark.parametrize(
+    ("name", "value"), [("VT_MAX_TURN_S", "20"), ("VT_MAX_TURN_S", "301"), ("VT_TTS_SPEED", "1.5")]
+)
+def test_speech_limits_are_enforced(monkeypatch: pytest.MonkeyPatch, name: str, value: str) -> None:
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_speech_models_dir_and_turn_length(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert Settings(_env_file=None).speech_models_dir is None
+    assert Settings(_env_file=None).max_turn_s == 120
+
+    monkeypatch.setenv("VT_SPEECH_MODELS_DIR", "data/models")
+
+    assert Settings(_env_file=None).speech_models_dir == Path("data/models")

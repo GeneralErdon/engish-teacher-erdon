@@ -15,6 +15,10 @@ LLM_DEV_URL := if PROFILE == "external" { replace(env("VT_LLM_BASE_URL", "http:/
 # Speaches service for the profile: speech recognition and the tutor's voice.
 SPEECH := if PROFILE == "nvidia" { "stt-nvidia" } else { "stt-cpu" }
 
+# Shared with Speaches (compose.yaml) so Settings → Voice can manage models. Linux only: the container
+# writes there as uid 1000. Empty means unset.
+MODELS_DEV_DIR := if os() == "linux" { "data/models" } else { "" }
+
 desktop := "@voice-tutor/desktop"
 tauri_manifest := "apps/desktop/src-tauri/Cargo.toml"
 
@@ -131,6 +135,7 @@ models:
 [env("VT_NOTES_DIR", "data/notes")]
 [env("VT_PRON_BASE_URL", "http://localhost:8001")]
 [env("VT_SECRET_KEY_FILE", "data/secret.key")]
+[env("VT_SPEECH_MODELS_DIR", MODELS_DEV_DIR)]
 [env("VT_STT_BASE_URL", "http://localhost:8000/v1")]
 [env("VT_TTS_BASE_URL", "http://localhost:8000/v1")]
 [group('dev')]

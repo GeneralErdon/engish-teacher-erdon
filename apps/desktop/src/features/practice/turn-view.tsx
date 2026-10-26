@@ -1,4 +1,5 @@
 import { Mic, Volume2 } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
 import { m } from 'motion/react'
 
 import { Badge } from '@/components/ui/badge'
@@ -21,6 +22,14 @@ export function TurnView({ turn, speaking = false }: { turn: Turn; speaking?: bo
           )}
           {turn.text}
         </div>
+        {turn.cut && (
+          <p className="text-muted-foreground px-1 font-mono text-[11px]">
+            <span>Cut at the turn limit</span> ·{' '}
+            <Link to="/settings" className="underline underline-offset-4">
+              Allow longer turns
+            </Link>
+          </p>
+        )}
         <CorrectionView text={turn.text} correction={turn.correction} />
       </m.div>
 

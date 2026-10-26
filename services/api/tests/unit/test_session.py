@@ -6,16 +6,21 @@ import itertools
 import json
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 from pydantic import SecretStr
 
+from vt_api.adapters.speaches import SpeachesServer
+from vt_api.domain.audio import duration_s
 from vt_api.domain.llm import ChatMessage, LlmConfig, ProviderConfig, ProviderError
+from vt_api.domain.speech import SessionSpeech, VoiceChoice, transcription_timeout_s
 from vt_api.ports.llm import ChatModel
 from vt_api.realtime.session import ConversationSession
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
-from vt_contracts.speech import ModelStatus
+from vt_api.services.speech import SpeechService
+from vt_contracts.speech import ModelStatus, SpeechSettings
 from vt_contracts.ws import (
     AssistantAudioDone,
     AssistantAudioStarted,
@@ -84,22 +89,46 @@ class ScriptedChat:
         return []
 
 
+SPEECH = SessionSpeech(
+    stt_model="whisper", voice=VoiceChoice("kokoro", "af_heart", 0.95), max_turn_s=120
+)
+DEFAULTS = SpeechSettings(
+    stt_model="whisper", tts_model="kokoro", tts_voice="af_heart", tts_speed=0.95, max_turn_s=120
+)
+
+
+class SavedSpeech:
+    """The saved speech settings; nothing saved means the defaults."""
+
+    def __init__(self, saved: SpeechSettings | None = None) -> None:
+        self.saved = saved
+
+    async def load(self) -> SpeechSettings | None:
+        return self.saved
+
+    async def save(self, settings: SpeechSettings) -> None:
+        self.saved = settings
+
+
 @dataclass
 class FakeStt:
     text: str = "I have went to the beach"
     error: ProviderError | None = None
     hold: asyncio.Event | None = None
     heard: list[bytes] = field(default_factory=list)
+    asked: list[tuple[str, float]] = field(default_factory=list)
+    """The model and timeout of each transcription."""
 
-    async def transcribe(self, wav: bytes) -> str:
+    async def transcribe(self, wav: bytes, model: str, timeout_s: float) -> str:
         self.heard.append(wav)
+        self.asked.append((model, timeout_s))
         if self.hold:
             await self.hold.wait()
         if self.error:
             raise self.error
         return self.text
 
-    async def status(self) -> ModelStatus:
+    async def status(self, model: str) -> ModelStatus:
         raise NotImplementedError
 
 
@@ -113,9 +142,11 @@ class FakeTts:
     hold: asyncio.Event | None = None
     """When set, waits on it after the first word."""
     said: list[str] = field(default_factory=list)
+    voices: list[VoiceChoice] = field(default_factory=list)
 
-    async def synthesize(self, text: str) -> AsyncIterator[bytes]:
+    async def synthesize(self, text: str, voice: VoiceChoice) -> AsyncIterator[bytes]:
         self.said.append(text)
+        self.voices.append(voice)
         for index, word in enumerate(text.split()):
             if self.error and index == self.fail_after:
                 raise self.error
@@ -123,7 +154,7 @@ class FakeTts:
                 await self.hold.wait()
             yield word.encode()
 
-    async def status(self) -> ModelStatus:
+    async def status(self, model: str) -> ModelStatus:
         raise NotImplementedError
 
 
@@ -167,13 +198,30 @@ def tts() -> FakeTts:
 
 
 @pytest.fixture
+def saved_speech() -> SavedSpeech:
+    return SavedSpeech()
+
+
+@pytest.fixture
+def speech(saved_speech: SavedSpeech, stt: FakeStt, tts: FakeTts) -> SpeechService:
+    return SpeechService(
+        repository=saved_speech,
+        stt=stt,
+        tts=tts,
+        recognition_server=create_autospec(SpeachesServer, instance=True),
+        voice_server=create_autospec(SpeachesServer, instance=True),
+        files=None,
+        defaults=DEFAULTS,
+    )
+
+
+@pytest.fixture
 def session(
     chat: ScriptedChat,
     events: list[ServerEvent],
     audio: list[bytes],
     learner_service: LearnerService,
-    stt: FakeStt,
-    tts: FakeTts,
+    speech: SpeechService,
 ) -> ConversationSession:
     def factory(provider: ProviderConfig) -> ChatModel:
         return chat
@@ -202,8 +250,7 @@ def session(
         send_audio=send_audio,
         llm=llm,
         learner=learner_service,
-        stt=stt,
-        tts=tts,
+        speech=speech,
         clock=lambda: next(ticks) / 10,
     )
 
@@ -375,6 +422,9 @@ async def test_a_spoken_turn(
     assert (transcript.text, transcript.source) == ("I have went to the beach", "voice")
     assert transcript.stt_ms == 100  # one clock tick
     assert stt.heard[0].startswith(b"RIFF")
+    assert stt.asked == [
+        (SPEECH.stt_model, transcription_timeout_s(duration_s(len(HALF_A_SECOND))))
+    ]
     assert len(_of(Correction, events)) == 1
     assert len(_of(AssistantTextDone, events)) == 1
 
@@ -392,22 +442,167 @@ async def test_each_turn_starts_with_fresh_audio(
     assert [len(wav) for wav in stt.heard] == [len(stt.heard[0])] * 2
 
 
-@pytest.mark.parametrize(
-    ("pcm", "code"),
-    [
-        (bytes(6_400), "audio_too_short"),  # 0.2 s
-        (bytes(32_000 * 61), "audio_too_long"),
-    ],
-)
-async def test_recordings_must_be_speech_length(
-    session: ConversationSession, events: list[ServerEvent], pcm: bytes, code: str
+async def test_a_recording_must_be_speech_length(
+    session: ConversationSession, events: list[ServerEvent]
 ) -> None:
     await session.handle(SessionStart())
-    _speak(session, pcm)
+    _speak(session, bytes(6_400))  # 0.2 s
     await session.handle(InputCommit())
 
-    assert [e.code for e in _of(ErrorEvent, events)] == [code]
+    assert [e.code for e in _of(ErrorEvent, events)] == ["audio_too_short"]
     assert _of(TranscriptFinal, events) == []
+
+
+async def test_a_long_turn_is_cut_not_lost(
+    session: ConversationSession,
+    saved_speech: SavedSpeech,
+    speech: SpeechService,
+    stt: FakeStt,
+    events: list[ServerEvent],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    saved_speech.saved = DEFAULTS.model_copy(update={"max_turn_s": 30})
+    recorded: list[float] = []
+    transcribe = speech.transcribe
+
+    async def spy(wav: bytes, audio_s: float, model: str) -> str:
+        recorded.append(audio_s)
+        return await transcribe(wav, audio_s, model)
+
+    monkeypatch.setattr(speech, "transcribe", spy)
+    await session.handle(SessionStart())
+    _speak(session, bytes(32_000 * 31))
+    await session.handle(InputCommit())
+    await _settle()
+
+    [transcript] = _of(TranscriptFinal, events)
+    assert transcript.cut is True
+    assert _of(ErrorEvent, events) == []
+    assert recorded == [30.0]
+    assert stt.asked == [("whisper", transcription_timeout_s(30.0))]
+    assert len(stt.heard[0]) == 44 + 32_000 * 30  # a WAV header, then exactly 30 s
+
+
+async def test_a_chunk_across_the_limit_is_trimmed_to_it(
+    session: ConversationSession,
+    saved_speech: SavedSpeech,
+    stt: FakeStt,
+    events: list[ServerEvent],
+) -> None:
+    saved_speech.saved = DEFAULTS.model_copy(update={"max_turn_s": 30})
+    await session.handle(SessionStart())
+    session.audio(bytes(32_000 * 29 + 16_000))  # 29.5 s
+    session.audio(bytes(32_000))  # 1 s, of which 0.5 s fits
+    await session.handle(InputCommit())
+    await _settle()
+
+    assert len(stt.heard[0]) == 44 + 32_000 * 30
+    assert _of(TranscriptFinal, events)[0].cut is True
+
+
+async def test_a_sample_split_across_chunks_stays_aligned(
+    session: ConversationSession, stt: FakeStt, events: list[ServerEvent]
+) -> None:
+    await session.handle(SessionStart())
+    session.audio(bytes(16_000) + bytes([1, 2, 3]))
+    session.audio(bytes([4, 5, 6]))
+    await session.handle(InputCommit())
+    await _settle()
+
+    assert stt.heard[0][-6:] == bytes([1, 2, 3, 4, 5, 6])
+    assert _of(TranscriptFinal, events)[0].cut is False
+
+
+async def test_the_cut_lands_on_the_limit_after_a_split_sample(
+    session: ConversationSession, saved_speech: SavedSpeech, stt: FakeStt
+) -> None:
+    saved_speech.saved = DEFAULTS.model_copy(update={"max_turn_s": 30})
+    await session.handle(SessionStart())
+    session.audio(bytes(31_999))  # an odd count: the buffer is mid-sample
+    session.audio(bytes(32_000 * 30))
+    await session.handle(InputCommit())
+    await _settle()
+
+    assert len(stt.heard[0]) == 44 + 32_000 * 30
+
+
+async def test_audio_after_the_cut_is_ignored(
+    session: ConversationSession, saved_speech: SavedSpeech, stt: FakeStt
+) -> None:
+    saved_speech.saved = DEFAULTS.model_copy(update={"max_turn_s": 30})
+    await session.handle(SessionStart())
+    session.audio(bytes(32_000 * 29 + 16_000))
+    session.audio(bytes(32_000))  # cut at 30 s
+    session.audio(bytes(640))  # would fit if the buffer had room: it has none
+    session.audio(bytes(32_000 * 29))
+    await session.handle(InputCommit())
+    await _settle()
+
+    assert len(stt.heard[0]) == 44 + 32_000 * 30
+
+
+async def test_a_turn_within_the_limit_is_not_cut(
+    session: ConversationSession, events: list[ServerEvent]
+) -> None:
+    await session.handle(SessionStart())
+    _speak(session)
+    await session.handle(InputCommit())
+    await _settle()
+
+    assert _of(TranscriptFinal, events)[0].cut is False
+
+
+async def test_audio_sent_before_start_does_not_leak_into_the_next_turn(
+    session: ConversationSession, events: list[ServerEvent], stt: FakeStt
+) -> None:
+    _speak(session, bytes(32_000 * 121))
+    await session.handle(InputCommit())  # not started: the audio is dropped
+    await session.handle(SessionStart())
+    _speak(session)
+    await session.handle(InputCommit())
+    await _settle()
+
+    assert [e.code for e in _of(ErrorEvent, events)] == ["not_started"]
+    assert _of(TranscriptFinal, events)[0].cut is False
+
+
+async def test_session_uses_the_chosen_voice(
+    session: ConversationSession, saved_speech: SavedSpeech, tts: FakeTts
+) -> None:
+    saved_speech.saved = DEFAULTS.model_copy(update={"tts_voice": "bf_emma", "tts_speed": 1.2})
+    await session.handle(SessionStart(speak=True))
+    await session.handle(InputText(text="Hello"))
+    await _settle()
+
+    assert tts.said
+    assert tts.voices == [VoiceChoice("kokoro", "bf_emma", 1.2)] * len(tts.said)
+
+
+async def test_missing_model_warns_at_start(
+    session: ConversationSession, speech: SpeechService, events: list[ServerEvent]
+) -> None:
+    speech.for_session = AsyncMock(  # type: ignore[method-assign]
+        return_value=SessionSpeech(
+            SPEECH.stt_model, SPEECH.voice, SPEECH.max_turn_s, missing=("recognition", "voice")
+        )
+    )
+    await session.handle(SessionStart())
+
+    first, second = _of(ErrorEvent, events)
+    assert (first.code, first.retryable) == ("speech_model_missing", True)
+    assert "speech recognition" in first.message
+    assert "default is used" in first.message
+    assert "Settings → Voice" in first.message
+    assert "the tutor's voice" in second.message
+    assert isinstance(events[0], SessionReady)  # the session still starts
+
+
+async def test_nothing_is_missing_by_default(
+    session: ConversationSession, events: list[ServerEvent]
+) -> None:
+    await session.handle(SessionStart())
+
+    assert _of(ErrorEvent, events) == []
 
 
 async def test_speech_recognition_failures(
@@ -472,6 +667,7 @@ async def test_the_tutor_speaks_each_sentence_as_it_is_written(
     await _settle()
 
     assert tts.said == ["Nice!", "What did you do?"]
+    assert tts.voices == [SPEECH.voice, SPEECH.voice]
     assert audio == [b"Nice!", b"What", b"did", b"you", b"do?"]
     kinds = [event.type for event in events if event.type.startswith(("assistant.", "turn."))]
     assert kinds == [
