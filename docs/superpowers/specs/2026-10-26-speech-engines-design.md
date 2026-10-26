@@ -86,7 +86,7 @@ Pin the whisper.cpp image by a `main-vulkan-<sha>` tag (with its digest) that is
 
 - Migration `v0003` adds to `speech_settings`:
   - `stt_engine`, with values `openai | whispercpp`;
-  - `stt_gpu_model`, the selected GGML model.
+  - `stt_gpu_model`, the selected GGML model. A row saved before it gets `""` (none chosen yet), which the api reads as `VT_STT_GPU_MODEL`.
 - `stt_model` stays the Speaches model.
 - **Why two model columns.** Each engine keeps its own choice, so going back to Speaches restores the learner's previous Speaches model.
 - **Validation** follows the "only what changed" rule from the speech-settings fix wave:
@@ -97,15 +97,18 @@ Pin the whisper.cpp image by a `main-vulkan-<sha>` tag (with its digest) that is
 
 - `for_session()` resolves the engine:
   - If the saved engine is `whispercpp` and its server answers, the session uses the GPU model.
-  - Otherwise it uses Speaches with `stt_model` (falling back to its default, as now). A new warning, `speech_engine_unavailable`, works like `speech_model_missing`: retryable, its message names the engine and says how to start it.
+  - Otherwise it uses Speaches with `stt_model` (falling back to its default, as now). A new warning, `speech_engine_unavailable`, is retryable like `speech_model_missing`.
+  - At the start, its message gives one of four reasons, each with what to do: the server is not running, `VT_SPEECH_MODELS_DIR` is unset, no GPU model is downloaded, or the server could not load the model (perhaps for lack of GPU memory).
 - **The GPU model is loaded when the conversation starts.** `for_session()` always asks the whisper.cpp server to load the chosen model (`/load`), because no route reports the loaded model: a server restarted since the last conversation holds its startup model again.
   - The server exits if `/load` cannot open a model (read in its source; for example, not enough GPU memory). Loading at the start catches that before the learner speaks, and the session falls back to Speaches with the warning.
 - **Mid-conversation fallback.** If the GPU server becomes unreachable during a conversation (a connection error or refusal, not an HTTP error answer), that turn is transcribed by Speaches instead.
   - The session stays on Speaches until the conversation ends; the GPU is not tried again on every turn.
   - It sends `speech_engine_unavailable` once.
   - The GPU client uses a short connect timeout (a few seconds), so a dead server fails fast. A server that accepts the connection but answers with an error or hangs past the transcription timeout stays `stt_failed`, as today.
+  - A dropped connection is retried once, at once, before the switch: a pooled keep-alive connection the server had closed fails the same way. A refused one is not retried.
 - **A whisper.cpp adapter, with the `SpeechToText` port unchanged:**
   - It transcribes through `/v1/audio/transcriptions`, with the same WAV and `language=en`. It may reuse the OpenAI adapter if the server's JSON matches; otherwise it is a small dedicated adapter. Verify the response shape in the server source.
+  - A transcript made only of whisper.cpp's annotations for silence or noise (`[BLANK_AUDIO]`, `(music)`, `♪`) is empty, so the turn is `no_speech`.
   - A transcription calls `/load` first only when its model differs from the one the adapter last loaded (a conversation start always loads, above). Loads and transcriptions are serialised with a lock, and the adapter tracks the loaded model.
   - A failed load is a `ProviderError`, so the turn reports `stt_failed`.
 - **Measured speed** stays keyed by model id. The ids are distinct per engine, so the turn-length estimate follows the engine automatically.
@@ -137,7 +140,7 @@ Pin the whisper.cpp image by a `main-vulkan-<sha>` tag (with its digest) that is
 
 **The readiness rows** name the engine in use.
 
-The Practice page shows the new warning through the existing alert, as it does for `speech_model_missing`.
+The Practice page shows the engine warning in its own alert, which stays for the rest of the conversation: a transcript does not clear it.
 
 ### Docs
 
