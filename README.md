@@ -358,4 +358,4 @@ Built on [FastAPI](https://fastapi.tiangolo.com/), [Silero VAD](https://github.c
 
 ## License
 
-Not decided yet (MIT is the planned default). See [docs/roadmap.md](docs/roadmap.md).
+[MIT](LICENSE) © 2026 Leandro Fermín. The models the app downloads keep their own licenses (see [Credits](#credits)).
