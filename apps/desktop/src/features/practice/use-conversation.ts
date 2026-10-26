@@ -39,8 +39,18 @@ export interface ConversationState {
 type Action =
   { type: 'status'; status: ConversationState['status'] } | { type: 'transcribing' } | ServerEvent
 
-/** Errors that end a transcription without a turn. */
-const SPEECH_ERRORS = new Set<string>(['stt_failed', 'no_speech', 'audio_too_short', 'not_started'])
+/**
+ * Errors that end a transcription without a turn. `audio_too_long` is gone from the api (long
+ * turns are cut now), but a v0.1.0 api still sends it: keep it for one release, or this UI would
+ * stay "transcribing" against that api.
+ */
+const SPEECH_ERRORS = new Set<string>([
+  'stt_failed',
+  'no_speech',
+  'audio_too_short',
+  'audio_too_long',
+  'not_started',
+])
 
 const initial: ConversationState = { status: 'connecting', turns: [], transcribing: false }
 

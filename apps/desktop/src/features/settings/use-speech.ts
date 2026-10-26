@@ -17,7 +17,8 @@ export function useSpeechStatus({ enabled = true } = {}) {
 
 /**
  * The model catalogue. It refetches every second while a download runs, and when the last one
- * ends (finished, cancelled or failed) the settings too: the api may have activated the model.
+ * ends (finished, cancelled or failed) the settings and the readiness too: the api may have
+ * activated the model.
  */
 export function useSpeechModels() {
   const queryClient = useQueryClient()
@@ -31,19 +32,24 @@ export function useSpeechModels() {
   useEffect(() => {
     if (was.current && !downloading) {
       void queryClient.invalidateQueries({ queryKey: speechSettingsQuery.queryKey })
+      void queryClient.invalidateQueries({ queryKey: speechStatusQuery.queryKey })
     }
     was.current = downloading
   }, [downloading, queryClient])
   return query
 }
 
-/** Save the speech settings; the answer replaces the cached settings. */
+/**
+ * Save the speech settings; the answer replaces the cached settings, and the catalogue and the
+ * readiness (of the models now in use) are re-read.
+ */
 export function useSaveSpeechSettings() {
   const queryClient = useQueryClient()
   return api.useMutation('put', '/v1/speech/settings', {
     onSuccess: (saved) => {
       queryClient.setQueryData(speechSettingsQuery.queryKey, saved)
       void queryClient.invalidateQueries({ queryKey: speechModelsQuery.queryKey })
+      void queryClient.invalidateQueries({ queryKey: speechStatusQuery.queryKey })
     },
   })
 }

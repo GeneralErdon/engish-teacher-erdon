@@ -18,6 +18,7 @@ import { VoicePicker } from './voice-picker'
 
 type Model = Schemas['SpeechModel']
 type Settings = Schemas['SpeechSettings']
+type View = Schemas['SpeechSettingsView']
 
 const KIND_NAMES = { recognition: 'speech recognition model', voice: "tutor's voice model" }
 
@@ -44,15 +45,19 @@ export function VoiceSettings() {
 
   const view = settings.data
   const { models, last_error: lastError } = catalogue.data
-  const current: Settings = {
-    stt_model: view.stt_model,
-    tts_model: view.tts_model,
-    tts_voice: view.tts_voice,
-    tts_speed: view.tts_speed,
-    max_turn_s: view.max_turn_s,
+  /** The settings as cached when a change is sent, not as rendered: a save may have landed since. */
+  const latest = (): Settings => {
+    const cached = queryClient.getQueryData<View>(speechSettingsQuery.queryKey) ?? view
+    return {
+      stt_model: cached.stt_model,
+      tts_model: cached.tts_model,
+      tts_voice: cached.tts_voice,
+      tts_speed: cached.tts_speed,
+      max_turn_s: cached.max_turn_s,
+    }
   }
   const update = (change: Partial<Settings>) => {
-    save.mutate({ body: { ...current, ...change } })
+    save.mutate({ body: { ...latest(), ...change } })
   }
 
   const chooseModel = async (model: Model) => {
@@ -65,9 +70,10 @@ export function VoiceSettings() {
       .query(voicesQuery(model.model_id))
       .then((list) => list.map((voice) => voice.id))
       .catch((): string[] => [])
+    const voice = latest().tts_voice
     update({
       tts_model: model.model_id,
-      tts_voice: ids.includes(view.tts_voice) ? view.tts_voice : (ids[0] ?? view.tts_voice),
+      tts_voice: ids.includes(voice) ? voice : (ids[0] ?? voice),
     })
   }
 
@@ -99,6 +105,7 @@ export function VoiceSettings() {
           models={models}
           manageable={catalogue.data.recognition_manageable}
           pending={view.pending}
+          disabled={save.isPending}
           onUse={(model) => void chooseModel(model)}
         />
       </section>
@@ -120,6 +127,7 @@ export function VoiceSettings() {
           models={models}
           manageable={catalogue.data.voice_manageable}
           pending={view.pending}
+          disabled={save.isPending}
           onUse={(model) => void chooseModel(model)}
         />
         <VoicePicker

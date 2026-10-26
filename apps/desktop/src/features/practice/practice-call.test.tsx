@@ -374,4 +374,10 @@ describe('transcription state', () => {
     expect(reducer(start, error('no_speech')).transcribing).toBe(false)
     expect(reducer(start, error('tts_failed')).transcribing).toBe(true)
   })
+
+  it('ends with audio_too_long, which an api before cut turns (v0.1.0) still sends', () => {
+    const tooLong = { ...error('no_speech'), code: 'audio_too_long' } as unknown as ServerEvent
+
+    expect(reducer(start, tooLong).transcribing).toBe(false)
+  })
 })

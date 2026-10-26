@@ -15,6 +15,9 @@ type Kind = Schemas['SpeechKind']
 
 const MB = 1_000_000
 
+/** "330 MB", or nothing for a model from the configuration, whose size the catalogue lacks. */
+const size = (model: Model) => (model.approx_mb > 0 ? `${String(model.approx_mb)} MB` : null)
+
 /**
  * The models of one kind as selectable rows. Choosing an installed one uses it; choosing one
  * that is not installed downloads it, and the api activates it when the download finishes.
@@ -25,6 +28,7 @@ export function ModelList({
   models,
   manageable,
   pending,
+  disabled = false,
   onUse,
 }: {
   /** Accessible name of the radio group. */
@@ -35,6 +39,8 @@ export function ModelList({
   manageable: boolean
   /** Model ids that will be used when their download finishes. */
   pending: readonly string[]
+  /** No model can be chosen meanwhile (a settings save is running). */
+  disabled?: boolean
   onUse: (model: Model) => void
 }) {
   const actions = useModelActions()
@@ -57,6 +63,7 @@ export function ModelList({
     <div className="flex flex-col gap-2">
       <RadioGroupPrimitive.Root
         aria-label={label}
+        disabled={disabled}
         value={proposal?.key ?? selected?.key ?? ''}
         onValueChange={(key) => {
           const model = rows.find((row) => row.key === key)
@@ -70,6 +77,7 @@ export function ModelList({
             model={model}
             manageable={manageable}
             pending={pending.includes(model.model_id)}
+            disabled={disabled}
             actions={actions}
             onUse={onUse}
             proposed={proposal?.key === model.key}
@@ -98,6 +106,7 @@ function ModelRow({
   model,
   manageable,
   pending,
+  disabled,
   actions,
   onUse,
   proposed,
@@ -106,6 +115,7 @@ function ModelRow({
   model: Model
   manageable: boolean
   pending: boolean
+  disabled: boolean
   actions: ReturnType<typeof useModelActions>
   onUse: (model: Model) => void
   /** The row is picked but not yet confirmed for download. */
@@ -116,6 +126,7 @@ function ModelRow({
   const key = { params: { path: { key: model.key } } }
   const downloading = model.state === 'downloading'
   const installed = model.state === 'installed'
+  const mb = size(model)
   const titleId = `model-${model.key}`
   const hintId = `${titleId}-hint`
 
@@ -144,9 +155,13 @@ function ModelRow({
             {model.default && <Badge variant="secondary">Default</Badge>}
             {model.selected && <Badge>In use</Badge>}
             <span className="text-muted-foreground text-xs">
-              {model.approx_mb} MB
-              {model.kind === 'recognition' &&
-                (model.english_only ? ' · English only' : ' · Multilingual')}
+              {[
+                mb,
+                model.kind === 'recognition' &&
+                  (model.english_only ? 'English only' : 'Multilingual'),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </span>
           </div>
           <span id={hintId} className="text-muted-foreground text-xs">
@@ -164,6 +179,7 @@ function ModelRow({
             <Button
               size="sm"
               variant="outline"
+              disabled={disabled}
               onClick={() => {
                 onUse(model)
               }}
@@ -180,7 +196,7 @@ function ModelRow({
                 actions.download.mutate({ ...key, body: { activate: false } })
               }}
             >
-              <Download /> Download ({model.approx_mb} MB)
+              <Download /> {mb ? `Download (${mb})` : 'Download'}
             </Button>
           )}
           {downloading && (
@@ -209,7 +225,7 @@ function ModelRow({
       </div>
       {proposed && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span>Download {model.approx_mb} MB and use it?</span>
+          <span>{mb ? `Download ${mb} and use it?` : 'Download and use it?'}</span>
           <Button
             size="xs"
             disabled={actions.download.isPending}

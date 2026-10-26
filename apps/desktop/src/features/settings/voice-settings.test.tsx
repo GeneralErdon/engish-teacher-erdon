@@ -44,6 +44,28 @@ const row = (list: HTMLElement, label: string) => {
   return within(card)
 }
 
+const LESSAC = 'speaches-ai/piper-en_US-lessac-medium'
+
+/** How many times the readiness rows asked `GET /v1/speech/status`. */
+const statusChecks = (api: FakeApi) =>
+  api.fetch.mock.calls.filter(([request]) => new URL(request.url).pathname === '/v1/speech/status')
+    .length
+
+/** `fetch` that holds the requests `matches` picks until `release()`. */
+function holding(api: FakeApi, matches: (request: Request) => boolean) {
+  let release: () => void = () => undefined
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  vi.stubGlobal('fetch', async (request: Request) => {
+    if (matches(request)) await held
+    return api.fetch(request)
+  })
+  return () => {
+    release()
+  }
+}
+
 function measured(api: FakeApi, msPerAudioS: number | null) {
   api.speechModels.models = api.speechModels.models.map((m) =>
     m.key === 'whisper-small-en' ? { ...m, ms_per_audio_s: msPerAudioS } : m,
@@ -77,6 +99,8 @@ describe('Speech recognition models', () => {
   it('selecting a model that is not installed downloads it and shows progress', async () => {
     const { user, api } = renderApp('/settings')
     const list = await recognition()
+    await screen.findAllByLabelText('Ready')
+    const checked = statusChecks(api)
 
     await user.click(within(list).getByRole('radio', { name: 'Whisper tiny (English)' }))
     const tiny = row(list, 'Whisper tiny (English)')
@@ -100,6 +124,9 @@ describe('Speech recognition models', () => {
     expect(row(list, 'Whisper small (English)').queryByText('In use')).not.toBeInTheDocument()
     await waitFor(() => {
       expect(screen.queryByText(/Will be used when/)).not.toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(statusChecks(api)).toBeGreaterThan(checked) // the readiness rows follow the model
     })
   })
 
@@ -211,6 +238,24 @@ describe('Speech recognition models', () => {
     await waitFor(() => {
       expect(row(list, 'Whisper small (English)').getByText('In use')).toBeInTheDocument()
     })
+  })
+
+  it('shows no size for a configured model the catalogue does not know', async () => {
+    const api = fakeApi()
+    api.speechModels.models = api.speechModels.models.map((m) =>
+      m.key === 'whisper-tiny-en'
+        ? { ...m, label: 'acme/whisper-custom.en', approx_mb: 0, from_configuration: true }
+        : m,
+    )
+    const { user } = renderApp('/settings', api)
+    const list = await recognition()
+    const custom = row(list, 'acme/whisper-custom.en')
+
+    expect(custom.getByText('English only')).toBeInTheDocument()
+    expect(custom.getByRole('button', { name: 'Download' })).toBeInTheDocument()
+    await user.click(within(list).getByRole('radio', { name: 'acme/whisper-custom.en' }))
+    expect(custom.getByText('Download and use it?')).toBeInTheDocument()
+    expect(custom.queryByText(/0 MB/)).not.toBeInTheDocument()
   })
 
   it('is read-only when the server cannot manage models', async () => {
@@ -500,6 +545,66 @@ describe('Tutor voice', () => {
       expect(api.sent.get('PUT /v1/speech/settings')?.at(-1)).toMatchObject({
         tts_model: 'speaches-ai/piper-en_US-lessac-medium',
         tts_voice: 'af_heart',
+      })
+    })
+  })
+})
+
+describe('Saving', () => {
+  it('re-checks readiness after a save', async () => {
+    const { user, api } = renderApp('/settings')
+    const speed = await screen.findByRole('radiogroup', { name: 'Speed' })
+    await screen.findAllByLabelText('Ready')
+    const checked = statusChecks(api)
+
+    await user.click(within(speed).getByRole('radio', { name: '1.2×' }))
+
+    await waitFor(() => {
+      expect(statusChecks(api)).toBeGreaterThan(checked)
+    })
+  })
+
+  it('locks the model lists while a save runs', async () => {
+    const api = fakeApi()
+    const { user } = renderApp('/settings', api)
+    const speed = await screen.findByRole('radiogroup', { name: 'Speed' })
+    const list = await recognition()
+    const release = holding(api, (request) => request.method === 'PUT')
+
+    await user.click(within(speed).getByRole('radio', { name: '1.2×' }))
+
+    await waitFor(() => {
+      expect(within(list).getByRole('radio', { name: 'Whisper base' })).toBeDisabled()
+    })
+    expect(row(list, 'Whisper base').getByRole('button', { name: 'Use' })).toBeDisabled()
+    release()
+    await waitFor(() => {
+      expect(within(list).getByRole('radio', { name: 'Whisper base' })).toBeEnabled()
+    })
+  })
+
+  it('a voice model chosen before a speed change keeps the new speed', async () => {
+    const api = fakeApi()
+    api.speechModels.models = api.speechModels.models.map((m) =>
+      m.key === 'piper-lessac' ? { ...m, state: 'installed' } : m,
+    )
+    const { user } = renderApp('/settings', api)
+    const list = await voiceModels()
+    const speed = screen.getByRole('radiogroup', { name: 'Speed' })
+    const release = holding(
+      api,
+      (request) => new URL(request.url).searchParams.get('model') === LESSAC,
+    )
+
+    await user.click(within(list).getByRole('radio', { name: 'Piper Lessac' })) // asks its voices
+    await user.click(within(speed).getByRole('radio', { name: '1.2×' }))
+    expect(await screen.findByText('Saved')).toBeInTheDocument()
+    release()
+
+    await waitFor(() => {
+      expect(api.sent.get('PUT /v1/speech/settings')?.at(-1)).toMatchObject({
+        tts_model: LESSAC,
+        tts_speed: 1.2,
       })
     })
   })
