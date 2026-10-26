@@ -98,6 +98,12 @@ Pin the whisper.cpp image by a `main-vulkan-<sha>` tag (with its digest) that is
 - `for_session()` resolves the engine:
   - If the saved engine is `whispercpp` and its server answers, the session uses the GPU model.
   - Otherwise it uses Speaches with `stt_model` (falling back to its default, as now). A new warning, `speech_engine_unavailable`, works like `speech_model_missing`: retryable, its message names the engine and says how to start it.
+- **The GPU model is loaded when the conversation starts.** `for_session()` asks the whisper.cpp server to have the chosen model loaded (`/load` when it differs).
+  - The server exits if `/load` cannot open a model (read in its source; for example, not enough GPU memory). Loading at the start catches that before the learner speaks, and the session falls back to Speaches with the warning.
+- **Mid-conversation fallback.** If the GPU server becomes unreachable during a conversation (a connection error or refusal, not an HTTP error answer), that turn is transcribed by Speaches instead.
+  - The session stays on Speaches until the conversation ends; the GPU is not tried again on every turn.
+  - It sends `speech_engine_unavailable` once.
+  - The GPU client uses a short connect timeout (a few seconds), so a dead server fails fast. A server that accepts the connection but answers with an error or hangs past the transcription timeout stays `stt_failed`, as today.
 - **A whisper.cpp adapter, with the `SpeechToText` port unchanged:**
   - It transcribes through `/v1/audio/transcriptions`, with the same WAV and `language=en`. It may reuse the OpenAI adapter if the server's JSON matches; otherwise it is a small dedicated adapter. Verify the response shape in the server source.
   - Before a transcription with a model other than the loaded one, it calls `/load`. Loads are serialised with a lock, and the adapter tracks the loaded model.
@@ -109,14 +115,14 @@ Pin the whisper.cpp image by a `main-vulkan-<sha>` tag (with its digest) that is
 
 - **Compose.** A service `stt-gpu`:
   - image: the pinned whisper.cpp Vulkan tag;
-  - profile `gpu`, usable together with `cpu` or `amd`;
+  - profiles `[gpu, amd]`. The `amd` profile is "Vulkan for everything", so `just up amd` and `just dev` with `VT_PROFILE=amd` start it with no other change (the desktop with the RX 9060 XT). `VT_PROFILE` stays a single value;
   - devices: `/dev/dri`;
   - volume: `./data/models:/models`;
   - port: `127.0.0.1:8002:8080`;
   - command: `whisper-server` with `--host 0.0.0.0 --port 8080 --request-path /v1 --inference-path /audio/transcriptions -m <default model path>`. Plus whatever the server needs to accept our WAV; the builder checks `--convert` and `--tmp-dir` against the server source.
   - The api gets `VT_STT_GPU_BASE_URL`, and the models folder is already shared.
 - **The default model is present before the server starts.**
-  - `just voice gpu` downloads it into `data/models` in the Hugging Face cache layout, on the host. Use `uvx --from huggingface-hub==2.2.0 hf download …` or the api's own worker module. Then it starts `stt-cpu` and `stt-gpu`.
+  - `just voice` takes an optional argument: `just voice gpu` runs Compose with the configured profile plus `--profile gpu`, starting `stt-cpu` and `stt-gpu` (the laptop with Ollama Cloud and `VT_PROFILE=cpu`). Before that it downloads the default model into `data/models` in the Hugging Face cache layout, on the host. Use `uvx --from huggingface-hub==2.2.0 hf download …` or the api's own worker module. Then it starts `stt-cpu` and `stt-gpu`.
   - A Compose-only start (`just up` with the `gpu` profile) needs the same guarantee, through a one-shot init service or a documented step. The builder picks the simpler of the two that works without the host's Python.
 - **Linux only.** The docs say so: Docker on Windows and macOS has no Vulkan GPU, and Phase 4 brings the native engine.
 - **Intel and AMD inside the container** need the image's Mesa Vulkan drivers (RADV for AMD, ANV for Intel). Check the image's Dockerfile (`.devops/main-vulkan.Dockerfile` in whisper.cpp) to confirm both are installed.
@@ -158,6 +164,10 @@ The Practice page shows the new warning through the existing alert, as it does f
 - **Fallback:** a GPU engine that is not running falls back to Speaches, with a warning.
 - **Starting:** `just voice gpu` starts both servers. The api never starts containers.
 - **Scope:** recognition only; the tutor's voice stays on Speaches.
+- *After review:*
+  - The GPU model is loaded when the conversation starts.
+  - If the GPU server becomes unreachable mid-conversation, that turn goes to Speaches, and the conversation stays there.
+  - `stt-gpu` is in the profiles `[gpu, amd]`. `just voice gpu` adds the `gpu` profile, so `VT_PROFILE` stays a single value.
 
 ## Left to the builder
 
