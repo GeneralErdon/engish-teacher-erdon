@@ -1,12 +1,15 @@
 # Supply-chain and secret scanning. Findings go to the repository's Security tab (SARIF).
+# Repository-wide, so not on every pull request: on release pull requests, pushes to master and
+# weekly. Every pull request gets Dependency review (ci.yml) for what it adds.
 # Policy (severities, ignores) lives in trivy.yaml, never here: trivy-action turns each `with:`
 # input into an environment variable that overrides the config file.
 name: Security
 
 on:
   push:
-    branches: [master, develop]
+    branches: [master]
   pull_request:
+    branches: [master]
   schedule:
     - cron: "17 6 * * 1" # Mondays: new CVEs in dependencies that did not change
   workflow_dispatch:
@@ -69,19 +72,3 @@ jobs:
       - name: pnpm audit (high and critical)
         if: ${{ !cancelled() }}
         run: pnpm audit --audit-level high
-
-  dependency-review:
-    name: Dependency review
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write # summary comment when the review fails
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
-        with:
-          fail-on-severity: high
-          comment-summary-in-pr: on-failure

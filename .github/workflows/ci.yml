@@ -1,5 +1,8 @@
 # Quality gates for every pull request and every push to master/develop.
 # What each job enforces, and how it maps to the git hooks: .github/README.md.
+# Pull requests into develop get the fast gates only; release pull requests (into master) and
+# pushes also run Desktop on Windows and the image builds. That condition is spelled out where
+# it applies: `github.event_name != 'pull_request' || github.base_ref == 'master'`.
 # Actions are pinned to commit SHAs (the comment shows the release); Dependabot bumps them.
 name: CI
 
@@ -112,7 +115,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: ${{ fromJSON((github.event_name != 'pull_request' || github.base_ref == 'master') && '["ubuntu-latest", "windows-latest"]' || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -143,7 +146,7 @@ jobs:
           fail_ci_if_error: false
 
   docker:
-    name: Docker · compose config, build api and pron
+    name: ${{ (github.event_name != 'pull_request' || github.base_ref == 'master') && 'Docker · compose config, build api and pron' || 'Docker · compose config' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -151,15 +154,18 @@ jobs:
           persist-credentials: false
       - name: compose.yaml is valid for every profile
         run: docker compose --profile "*" config --quiet
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - if: github.event_name != 'pull_request' || github.base_ref == 'master'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: github.event_name != 'pull_request' || github.base_ref == 'master'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: services/api/Dockerfile
           push: false
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - if: github.event_name != 'pull_request' || github.base_ref == 'master'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: services/pron/Dockerfile
@@ -168,13 +174,32 @@ jobs:
           cache-to: type=gha,mode=max,scope=pron
       # TODO(Phase 2): fail if the README results block is out of date with eval/results/latest.json.
 
+  # The security check that is about the pull request itself; the repository-wide scans
+  # (security.yml, codeql.yml) run on release pull requests, pushes to master and weekly.
+  dependencies:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # summary comment when the review fails
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+
   # The one check branch protection requires. GitHub counts a skipped required check as passing,
   # so requiring each job separately is fragile; this job fails if any job above failed or was
-  # cancelled (skipped is fine: `commits` only runs on pull requests, except back-merges).
+  # cancelled (skipped is fine: `commits` and `dependencies` only run on pull requests, `commits`
+  # not on back-merges).
   ci-ok:
     name: CI ok
     if: ${{ always() }}
-    needs: [commits, hygiene, python, ui, desktop, docker]
+    needs: [commits, hygiene, python, ui, desktop, docker, dependencies]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed
