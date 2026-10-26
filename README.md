@@ -247,8 +247,11 @@ All settings live in `.env`, starting from [`.env.example`](.env.example). They 
 | `VT_TTS_BASE_URL` | `http://tts:8000/v1` | Text-to-speech endpoint (the same Speaches). |
 | `VT_TTS_MODEL` | `speaches-ai/Kokoro-82M-v1.0-ONNX` | The tutor's voice, downloaded once ([voice setup](docs/configuration.md#voice-setup)). |
 | `VT_TTS_VOICE` | `af_heart` | Tutor voice (American or British English). |
+| `VT_MAX_TURN_S` | `120` | Longest spoken turn in seconds (30–300). |
 | `VT_PRON_BASE_URL` | `http://pron:8001` | Pronunciation scoring service. |
 | `VT_NOTES_DIR` | `/data/notes` | Where session notes are written (mount it into your Obsidian vault if you like). |
+
+The speech models, the tutor's voice and speed, and the turn length are easier to set in the app under **Settings → Voice**, which wins over the `VT_STT_*`, `VT_TTS_*` and `VT_MAX_TURN_S` variables. Downloads happen on the server and are stored in `data/models`, shared with Speaches ([details](docs/configuration.md#voice-setup)).
 
 The full reference, including the `pron` service and Docker-only variables, is in [docs/configuration.md](docs/configuration.md).
 

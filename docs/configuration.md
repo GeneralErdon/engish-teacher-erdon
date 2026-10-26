@@ -20,11 +20,13 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_LLM_TEMPERATURE` | float 0–2 | `0.6` | Teacher creativity |
 | `VT_STT_BACKEND` | `openai \| whispercpp` | `openai` | Selects STT adapter |
 | `VT_STT_BASE_URL` | URL | `http://stt:8000/v1` | STT endpoint |
-| `VT_STT_MODEL` | str | `Systran/faster-distil-whisper-small.en` | Speaches model id, downloaded on Speaches' first start ([voice setup](#voice-setup)); on a GPU, `Systran/faster-whisper-large-v3-turbo` |
+| `VT_STT_MODEL` | str | `Systran/faster-distil-whisper-small.en` | Default speech-recognition model until you save one in Settings → Voice. Speaches model id, downloaded on Speaches' first start ([voice setup](#voice-setup)); on a GPU, `Systran/faster-whisper-large-v3-turbo` |
 | `VT_TTS_BASE_URL` | URL | `http://tts:8000/v1` | TTS endpoint: the same Speaches as STT. Any server with an OpenAI-compatible `/audio/speech` that streams raw PCM at 24 kHz works, e.g. Kokoro-FastAPI on port `8880` |
-| `VT_TTS_MODEL` | str | `speaches-ai/Kokoro-82M-v1.0-ONNX` | Kokoro on ONNX Runtime, downloaded once ([voice setup](#voice-setup)). Lighter (~120 MB): `speaches-ai/Kokoro-82M-v1.0-ONNX-int8`. Kokoro-FastAPI: `kokoro` |
-| `VT_TTS_VOICE` | str | `af_heart` | Tutor voice: American (`af_*`, `am_*`) or British (`bf_*`, `bm_*`) English, e.g. `am_michael`, `bf_emma` |
-| `VT_TTS_SPEED` | float 0.5–2.0 | `0.95` | Slightly slower helps learners |
+| `VT_TTS_MODEL` | str | `speaches-ai/Kokoro-82M-v1.0-ONNX` | Default voice model until you save one in Settings → Voice. Kokoro on ONNX Runtime, downloaded once ([voice setup](#voice-setup)). Lighter (~120 MB): `speaches-ai/Kokoro-82M-v1.0-ONNX-int8`. Kokoro-FastAPI: `kokoro` |
+| `VT_TTS_VOICE` | str | `af_heart` | Default voice until you save one in Settings → Voice. Tutor voice: American (`af_*`, `am_*`) or British (`bf_*`, `bm_*`) English, e.g. `am_michael`, `bf_emma` |
+| `VT_TTS_SPEED` | float 0.7–1.3 | `0.95` | Default speaking speed until you save one in Settings → Voice. Slightly slower helps learners |
+| `VT_MAX_TURN_S` | int 30–300 | `120` | Longest spoken turn, in seconds. Settings → Voice offers 30 s, 1, 2, 3 and 5 min |
+| `VT_SPEECH_MODELS_DIR` | existing directory | unset | The Hugging Face cache folder shared with Speaches. Set, Settings → Voice downloads and removes models there; unset, the model lists are read-only. Docker Compose sets `/data/models`; on Linux `just dev-api` sets `data/models` (not on Windows or macOS, where the Speaches container would not share file ownership with your user). On Linux the Speaches container writes there as uid 1000, so the folder must be writable by that user (it is when a uid-1000 user cloned the repository) |
 | `VT_PRON_BASE_URL` | URL | `http://pron:8001` | Pronunciation service |
 | `VT_LEARNER_L1` | ISO 639 code | `es` | Learner's native language (explanations and typical errors) |
 | `VT_LEARNER_LEVEL` | `A1…C2` | `B1` | Starting level. Changeable in the app (**Settings → Learning**), which wins |
@@ -64,9 +66,11 @@ Both directions of speech run on your machine in one [Speaches](https://speaches
 just voice        # = docker compose --profile cpu up -d --wait stt-cpu
 ```
 
-It starts Speaches on `127.0.0.1:8000` and returns once it is healthy. Compose passes `VT_STT_MODEL` and `VT_TTS_MODEL` to Speaches as `PRELOAD_MODELS`, so the first start downloads both (~340 MB for speech recognition, ~355 MB for the voice) into the `stt-models` volume; later starts find them there. Change either model in `.env` and run `just voice` again: Compose recreates the container and Speaches fetches the new one. Follow a download with `docker compose logs -f stt-cpu`.
+It starts Speaches on `127.0.0.1:8000` and returns once it is healthy. Compose passes `VT_STT_MODEL` and `VT_TTS_MODEL` to Speaches as `PRELOAD_MODELS`, so the first start downloads both (~340 MB for speech recognition, ~355 MB for the voice) into `data/models`; later starts find them there. Other models are downloaded from **Settings → Voice**, which shows the progress and can cancel or remove them. Change either model in `.env` and run `just voice` again: Compose recreates the container and Speaches fetches the new one. Follow a download with `docker compose logs -f stt-cpu`.
 
 On a Speaches you run yourself, download a model with `SPEACHES_BASE_URL=http://localhost:8000 uvx speaches-cli model download <model id>`.
+
+**One-time re-download.** The models used to live in the `stt-models` Docker volume. They now live in `./data/models`, a folder the api and Speaches share, so the ~700 MB of defaults are downloaded again once on the first start. Then remove the old volume: `docker volume rm <project>_stt-models`, where `<project>` is the Compose project name (usually the folder name, e.g. `voice-tutor_stt-models`; `docker volume ls` lists it).
 
 **Settings → Voice** in the app checks each part (`GET /v1/speech/status`) and says what to run.
 

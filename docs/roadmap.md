@@ -14,8 +14,8 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 
 ## Phase 1: Conversation MVP (≈ 20–25 h)
 - [ ] (done in bootstrap) uv workspace, tooling, pre-commit, CI skeleton
-- [ ] `vt_contracts` WS protocol + generated TS types
-- [ ] `api`: settings, container, ports, OpenAI-compatible adapters, health checks
+- [x] `vt_contracts` WS protocol + generated TS types
+- [x] `api`: settings, container, ports, OpenAI-compatible adapters, health checks
 - [x] Chat model providers chosen from the UI: Ollama (local and cloud), OpenAI, Anthropic, Gemini, and any OpenAI- or Anthropic-compatible endpoint. API keys stay in the api and never come back to the UI (2026-10-21)
 - [x] Settings stored encrypted: SQLCipher database (SQLAlchemy + Alembic, ready for a Postgres engine), API keys sealed again with AES-256-GCM, master key in the OS keyring (2026-10-22)
 - [x] UI shell: responsive navigation, Home (welcome + status), Settings, light/dark theme, typed API client generated from the api's OpenAPI schema (2026-10-21)
@@ -25,7 +25,8 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 - [x] The tutor speaks: sentence-streamed TTS (Kokoro in Speaches), voice on/off per device, interrupting it stops the audio at once (2026-10-22)
 - [x] Call mode, hands-free: Silero VAD in the UI ends each turn without a button, talking over the tutor interrupts it, an orb follows whoever talks, captions and corrections for after the call (2026-10-22)
 - [x] Teacher: level-aware conversation + structured corrections (2026-10-22)
-- [ ] UI (desktop + browser): talk screen, live transcript, corrections panel
+- [x] UI (desktop + browser): talk screen, live transcript, corrections panel
+- [x] Speech settings: Settings → Voice picks the speech-recognition model, the tutor's voice and speed, and the turn length; models download, cancel and uninstall from the UI into a folder shared with Speaches (2026-10-26)
 - [ ] Session note (Markdown) + notes viewer
 - [ ] `compose.yaml` with `cpu`, `amd`, `external` profiles; README quick start verified on a clean machine
 
@@ -38,7 +39,7 @@ Each phase ends with something usable and measured. Time boxes are deliberate: i
 ## Phase 3: Polish (≈ 8–12 h)
 - [ ] Progress dashboard (weak phonemes, recurring mistakes, streak)
 - [ ] `nvidia` profile, HTTPS profile (Caddy), Tailscale docs
-- [ ] Multi-arch images on GHCR; desktop installers (Windows + Linux) built in CI; release workflow
+- [x] Multi-arch images on GHCR; desktop installers built in CI; release workflow (v0.1.0, 2026-10-23)
 - [ ] Demo video (2 min) and write-up
 - [ ] Choose licence (MIT planned)
 

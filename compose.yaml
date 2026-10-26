@@ -32,6 +32,10 @@ services:
     <<: *env-file
     ports:
       - "127.0.0.1:8080:8080"
+    environment:
+      # The api owns the speech model files (Settings → Voice downloads and removes them here);
+      # Speaches mounts the same folder below and only serves what it finds.
+      VT_SPEECH_MODELS_DIR: /data/models
     volumes:
       - ./data:/data
     extra_hosts:
@@ -71,8 +75,10 @@ services:
 
   # ------------------------------------------------------------------ speech (Speaches)
   # Speech-to-text (faster-whisper) and the tutor's voice (Kokoro on ONNX Runtime) in one server.
-  # `just voice` starts it alone. The first start downloads both models (~700 MB) before the
-  # healthcheck passes; later starts find them in the volume.
+  # `just voice` starts it alone. The first start still pre-downloads the two default models
+  # (~700 MB, PRELOAD_MODELS) before the healthcheck passes; later starts find them in ./data/models,
+  # the folder the api shares (VT_SPEECH_MODELS_DIR). Other models are downloaded from
+  # Settings → Voice. On Linux the container writes there as uid 1000.
   stt-cpu:
     image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu
     profiles: [cpu, amd, external]
@@ -82,7 +88,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - stt-models:/home/ubuntu/.cache/huggingface/hub
+      - ./data/models:/home/ubuntu/.cache/huggingface/hub
     healthcheck: &speaches-healthcheck
       <<: *model-healthcheck
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
@@ -96,7 +102,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - stt-models:/home/ubuntu/.cache/huggingface/hub
+      - ./data/models:/home/ubuntu/.cache/huggingface/hub
     gpus: all
     healthcheck: *speaches-healthcheck
     restart: unless-stopped
@@ -165,6 +171,5 @@ services:
   # (docker/caddy/Caddyfile, docs/hardware.md#remote-access).
 
 volumes:
-  stt-models:
   llm-models:
   ollama:

@@ -6,6 +6,9 @@
 # Runtime data (notes, progress.db, recordings); keep the folder so bind mounts stay user-owned
 data/*
 !data/.gitkeep
+!data/models/
+data/models/*
+!data/models/.gitkeep
 
 # Models and checkpoints (downloaded at runtime, never committed)
 /models/
