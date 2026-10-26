@@ -6,6 +6,7 @@ ties them to the saved settings.
 
 from dataclasses import dataclass
 
+from vt_api.domain.llm import ProviderError
 from vt_contracts.speech import SpeechKind
 
 # Piper makes 22.05 kHz audio. Speaches resamples when asked, so every voice streams at the
@@ -217,3 +218,13 @@ class SpeechSettingsError(Exception):
         super().__init__(message)
         self.status = status
         self.message = message
+
+
+class EngineUnreachable(ProviderError):  # noqa: N818 (a condition, named for what happened)
+    """The GPU speech server refused the connection: it is not running (or has just exited).
+
+    Unlike a timeout or an error answer, it tells a conversation to fall back to the CPU engine.
+    """
+
+    def __init__(self, base_url: str) -> None:
+        super().__init__("connection", f"Could not connect to {base_url}.")

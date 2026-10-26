@@ -17,6 +17,23 @@ class SpeechToText(Protocol):
         ...
 
 
+class GpuSpeechToText(SpeechToText, Protocol):
+    """Speech recognition on a GPU server that holds one model at a time (whisper.cpp).
+
+    `model` is always the file's path relative to the shared models folder, in `transcribe` too.
+    """
+
+    async def running(self) -> bool:
+        """Whether the server answers its health check (also while it loads a model); never
+        raises."""
+        ...
+
+    async def load(self, model: str) -> None:
+        """Make the server hold `model`; fine if it already does. Raises `ProviderError`, and
+        `EngineUnreachable` when the server is not running."""
+        ...
+
+
 class TextToSpeech(Protocol):
     def synthesize(self, text: str, voice: VoiceChoice) -> AsyncIterator[bytes]:
         """`text` spoken as PCM16 little-endian mono at `OUTPUT_SAMPLE_RATE_HZ`, streamed as it
