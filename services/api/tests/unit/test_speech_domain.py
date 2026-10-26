@@ -1,9 +1,12 @@
+import pytest
+
 from vt_api.domain.speech import (
     CATALOG,
     SpeechSettingsError,
     catalog,
     entry,
     entry_for,
+    split_model_id,
     transcription_timeout_s,
 )
 
@@ -78,3 +81,15 @@ def test_a_settings_error_carries_status_and_message() -> None:
 
     assert (error.status, error.message) == (409, "Another download is running.")
     assert str(error) == "Another download is running."
+
+
+def test_split_model_id() -> None:
+    # `org/name` is a whole repository, `org/name/file.bin` one file of it.
+    assert split_model_id("org/name") == ("org/name", None)
+    assert split_model_id("org/name/file.bin") == ("org/name", "file.bin")
+
+
+@pytest.mark.parametrize("model_id", ["a/b/c/d", "a//b", "a", "", "a/b/"])
+def test_split_model_id_refuses_what_names_no_model(model_id: str) -> None:
+    with pytest.raises(ValueError, match="Not a repo id"):
+        split_model_id(model_id)

@@ -189,6 +189,17 @@ def entry_for(model_id: str) -> CatalogEntry | None:
     return next((e for e in CATALOG if e.model_id == model_id), None)
 
 
+def split_model_id(model_id: str) -> tuple[str, str | None]:
+    """`org/name` is a whole repository; `org/name/file.bin` is one file of one.
+
+    Raises `ValueError` for more than three segments or an empty one.
+    """
+    parts = model_id.split("/")
+    if len(parts) not in (2, 3) or any(part == "" for part in parts):
+        raise ValueError(f"Not a repo id (org/name) or a file of one (org/name/file): {model_id!r}")
+    return "/".join(parts[:2]), (parts[2] if len(parts) == 3 else None)
+
+
 def transcription_timeout_s(audio_s: float) -> float:
     """Time allowed to transcribe a turn: a fixed allowance plus 3x the audio (slow CPUs)."""
     return 30 + 3 * audio_s

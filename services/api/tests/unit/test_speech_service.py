@@ -5,7 +5,7 @@ import asyncio
 import io
 import itertools
 import wave
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Collection, Iterator
 from typing import Any
 from unittest.mock import NonCallableMagicMock, create_autospec
 
@@ -143,6 +143,12 @@ class FakeFiles:
 
     async def incomplete(self) -> set[str]:
         return set(self.partial)
+
+    async def present(self, model_ids: Collection[str]) -> set[str]:
+        return {model_id for model_id in model_ids if model_id in self.models}
+
+    async def snapshot_path(self, model_id: str) -> str | None:
+        return f"snapshots/{model_id}" if model_id in self.models else None
 
     def cleanup(self) -> None:
         raise NotImplementedError  # the adapter runs it when it is built

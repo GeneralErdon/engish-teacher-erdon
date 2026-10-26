@@ -4,7 +4,7 @@ Speaches, the models folder and the speech adapters."""
 import asyncio
 import io
 import wave
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Collection
 from typing import Any
 from unittest.mock import NonCallableMagicMock, create_autospec
 
@@ -72,6 +72,12 @@ class FakeFiles:
 
     async def incomplete(self) -> set[str]:
         return set()
+
+    async def present(self, model_ids: Collection[str]) -> set[str]:
+        return set()
+
+    async def snapshot_path(self, model_id: str) -> str | None:
+        return None
 
     def cleanup(self) -> None:
         raise NotImplementedError

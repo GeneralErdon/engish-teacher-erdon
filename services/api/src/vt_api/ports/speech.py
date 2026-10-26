@@ -1,6 +1,6 @@
 """Ports for speech: the learner's voice to text, and the tutor's text to voice."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Collection
 from typing import Protocol
 
 from vt_api.domain.speech import VoiceChoice
@@ -84,6 +84,15 @@ class ModelFiles(Protocol):
     async def incomplete(self) -> set[str]:
         """The models whose files are half-written: a download that has not finished, or one an
         api killed mid-download left. The server may list them, but they are not installed."""
+        ...
+
+    async def present(self, model_ids: Collection[str]) -> set[str]:
+        """The single-file ids (`org/name/file`) among `model_ids` whose file is complete in the
+        folder. Never the file a download of ours is writing."""
+        ...
+
+    async def snapshot_path(self, model_id: str) -> str | None:
+        """The complete file's POSIX path relative to the folder, or `None`."""
         ...
 
     def cleanup(self) -> None:
