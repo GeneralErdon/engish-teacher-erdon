@@ -442,7 +442,7 @@ export interface components {
             activate: boolean;
         };
         /** @enum {string} */
-        ErrorCode: "bad_event" | "not_started" | "llm_failed" | "stt_failed" | "tts_failed" | "no_speech" | "audio_too_short" | "speech_model_missing";
+        ErrorCode: "bad_event" | "not_started" | "llm_failed" | "stt_failed" | "tts_failed" | "no_speech" | "audio_too_short" | "speech_model_missing" | "speech_engine_unavailable";
         /** ErrorEvent */
         ErrorEvent: {
             code: components["schemas"]["ErrorCode"];
@@ -871,6 +871,7 @@ export interface components {
         /** SpeechStatus */
         SpeechStatus: {
             recognition: components["schemas"]["ModelStatus"];
+            recognition_engine: components["schemas"]["SttEngine"];
             synthesis: components["schemas"]["ModelStatus"];
         };
         /** @enum {string} */

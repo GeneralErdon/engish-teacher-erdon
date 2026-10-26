@@ -5,7 +5,7 @@ import asyncio
 import itertools
 import json
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from unittest.mock import AsyncMock, create_autospec
 
 import pytest
@@ -14,7 +14,13 @@ from pydantic import SecretStr
 from vt_api.adapters.speaches import SpeachesServer
 from vt_api.domain.audio import duration_s
 from vt_api.domain.llm import ChatMessage, LlmConfig, ProviderConfig, ProviderError
-from vt_api.domain.speech import SessionSpeech, VoiceChoice, transcription_timeout_s
+from vt_api.domain.speech import (
+    EngineUnreachable,
+    Recognition,
+    SessionSpeech,
+    VoiceChoice,
+    transcription_timeout_s,
+)
 from vt_api.ports.llm import ChatModel
 from vt_api.realtime.session import ConversationSession
 from vt_api.services.learner import LearnerService
@@ -90,7 +96,23 @@ class ScriptedChat:
 
 
 SPEECH = SessionSpeech(
-    stt_model="whisper", voice=VoiceChoice("kokoro", "af_heart", 0.95), max_turn_s=120
+    recognition=Recognition("openai", "whisper", "whisper"),
+    voice=VoiceChoice("kokoro", "af_heart", 0.95),
+    max_turn_s=120,
+)
+GPU_MODEL = "ggerganov/whisper.cpp/ggml-small.en-q8_0.bin"
+GPU_PATH = f"models--ggerganov--whisper.cpp/snapshots/0123/{GPU_MODEL.rsplit('/', 1)[1]}"
+ON_THE_GPU = replace(
+    SPEECH,
+    recognition=Recognition("whispercpp", GPU_MODEL, GPU_PATH),
+    fallback=SPEECH.recognition,
+)
+GPU_UNAVAILABLE = (
+    "whisper.cpp (GPU) is not running: Speaches transcribes this conversation. Start it with "
+    "`just voice gpu`, or choose Speaches in Settings → Voice."
+)
+GPU_STOPPED = (
+    "whisper.cpp (GPU) stopped answering: Speaches transcribes the rest of this conversation."
 )
 DEFAULTS = SpeechSettings(
     stt_model="whisper",
@@ -128,6 +150,34 @@ class FakeStt:
     async def transcribe(self, wav: bytes, model: str, timeout_s: float) -> str:
         self.heard.append(wav)
         self.asked.append((model, timeout_s))
+        if self.hold:
+            await self.hold.wait()
+        if self.error:
+            raise self.error
+        return self.text
+
+    async def status(self, model: str) -> ModelStatus:
+        raise NotImplementedError
+
+
+@dataclass
+class FakeGpu:
+    """The whisper.cpp server, as a conversation on it sees it: loaded when it started."""
+
+    text: str = "I have gone to the beach"
+    error: ProviderError | None = None
+    hold: asyncio.Event | None = None
+    asked: list[str] = field(default_factory=list)
+    """The model path of each transcription."""
+
+    async def running(self) -> bool:
+        raise NotImplementedError
+
+    async def load(self, model: str) -> None:
+        raise NotImplementedError
+
+    async def transcribe(self, wav: bytes, model: str, timeout_s: float) -> str:
+        self.asked.append(model)
         if self.hold:
             await self.hold.wait()
         if self.error:
@@ -204,12 +254,19 @@ def tts() -> FakeTts:
 
 
 @pytest.fixture
+def gpu() -> FakeGpu:
+    return FakeGpu()
+
+
+@pytest.fixture
 def saved_speech() -> SavedSpeech:
     return SavedSpeech()
 
 
 @pytest.fixture
-def speech(saved_speech: SavedSpeech, stt: FakeStt, tts: FakeTts) -> SpeechService:
+def speech(saved_speech: SavedSpeech, stt: FakeStt, tts: FakeTts, gpu: FakeGpu) -> SpeechService:
+    """Without the models folder, the GPU engine is unusable: tests put a conversation on it
+    through `for_session`."""
     return SpeechService(
         repository=saved_speech,
         stt=stt,
@@ -218,6 +275,7 @@ def speech(saved_speech: SavedSpeech, stt: FakeStt, tts: FakeTts) -> SpeechServi
         voice_server=create_autospec(SpeachesServer, instance=True),
         files=None,
         defaults=DEFAULTS,
+        gpu_stt=gpu,
     )
 
 
@@ -429,7 +487,7 @@ async def test_a_spoken_turn(
     assert transcript.stt_ms == 100  # one clock tick
     assert stt.heard[0].startswith(b"RIFF")
     assert stt.asked == [
-        (SPEECH.stt_model, transcription_timeout_s(duration_s(len(HALF_A_SECOND))))
+        (SPEECH.recognition.server_model, transcription_timeout_s(duration_s(len(HALF_A_SECOND))))
     ]
     assert len(_of(Correction, events)) == 1
     assert len(_of(AssistantTextDone, events)) == 1
@@ -471,9 +529,9 @@ async def test_a_long_turn_is_cut_not_lost(
     recorded: list[float] = []
     transcribe = speech.transcribe
 
-    async def spy(wav: bytes, audio_s: float, model: str) -> str:
+    async def spy(wav: bytes, audio_s: float, recognition: Recognition) -> str:
         recorded.append(audio_s)
-        return await transcribe(wav, audio_s, model)
+        return await transcribe(wav, audio_s, recognition)
 
     monkeypatch.setattr(speech, "transcribe", spy)
     await session.handle(SessionStart())
@@ -588,9 +646,7 @@ async def test_missing_model_warns_at_start(
     session: ConversationSession, speech: SpeechService, events: list[ServerEvent]
 ) -> None:
     speech.for_session = AsyncMock(  # type: ignore[method-assign]
-        return_value=SessionSpeech(
-            SPEECH.stt_model, SPEECH.voice, SPEECH.max_turn_s, missing=("recognition", "voice")
-        )
+        return_value=replace(SPEECH, missing=("recognition", "voice"))
     )
     await session.handle(SessionStart())
 
@@ -809,3 +865,134 @@ async def test_only_words_are_spoken(
     await _settle()
 
     assert tts.said == ["Nice!"]
+
+
+# ---------------------------------------------------------------- the speech recognition engine
+
+
+def _on_the_gpu(speech: SpeechService) -> None:
+    speech.for_session = AsyncMock(return_value=ON_THE_GPU)  # type: ignore[method-assign]
+
+
+async def _say(session: ConversationSession) -> None:
+    _speak(session)
+    await session.handle(InputCommit())
+
+
+async def test_start_warns_when_the_engine_is_unavailable(
+    session: ConversationSession, saved_speech: SavedSpeech, events: list[ServerEvent]
+) -> None:
+    """Review Focus 4: whisper.cpp is saved, but the GPU engine is unusable (no models
+    folder here)."""
+    saved_speech.saved = DEFAULTS.model_copy(update={"stt_engine": "whispercpp"})
+
+    await session.handle(SessionStart())
+
+    assert isinstance(events[0], SessionReady)  # the session still starts
+    assert _of(ErrorEvent, events) == [
+        ErrorEvent(code="speech_engine_unavailable", message=GPU_UNAVAILABLE, retryable=True)
+    ]
+
+
+async def test_a_turn_on_the_gpu(
+    session: ConversationSession,
+    speech: SpeechService,
+    gpu: FakeGpu,
+    stt: FakeStt,
+    events: list[ServerEvent],
+) -> None:
+    _on_the_gpu(speech)
+    await session.handle(SessionStart())
+    await _say(session)
+    await _settle()
+
+    assert gpu.asked == [GPU_PATH]
+    assert stt.asked == []
+    assert [t.text for t in _of(TranscriptFinal, events)] == ["I have gone to the beach"]
+    assert _of(ErrorEvent, events) == []
+
+
+async def test_gpu_unreachable_mid_conversation_switches_to_speaches_once(
+    session: ConversationSession,
+    speech: SpeechService,
+    gpu: FakeGpu,
+    stt: FakeStt,
+    events: list[ServerEvent],
+) -> None:
+    """Review Focus 2: the GPU server died after the conversation started."""
+    _on_the_gpu(speech)
+    gpu.error = EngineUnreachable("http://localhost:8002/v1")
+    await session.handle(SessionStart())
+    await _say(session)
+    await _settle()
+    await _say(session)
+    await _settle()
+
+    assert gpu.asked == [GPU_PATH]  # the second turn goes straight to Speaches
+    assert [model for model, _ in stt.asked] == ["whisper", "whisper"]
+    assert [t.text for t in _of(TranscriptFinal, events)] == ["I have went to the beach"] * 2
+    assert _of(ErrorEvent, events) == [
+        ErrorEvent(code="speech_engine_unavailable", message=GPU_STOPPED, retryable=True)
+    ]
+
+
+async def test_two_turns_losing_the_gpu_together_warn_once(
+    session: ConversationSession,
+    speech: SpeechService,
+    gpu: FakeGpu,
+    stt: FakeStt,
+    events: list[ServerEvent],
+) -> None:
+    _on_the_gpu(speech)
+    gpu.error = EngineUnreachable("http://localhost:8002/v1")
+    gpu.hold = asyncio.Event()
+    await session.handle(SessionStart())
+    await _say(session)
+    await _say(session)
+    await _settle()  # both turns wait on the GPU
+
+    gpu.hold.set()
+    await _settle()
+
+    assert gpu.asked == [GPU_PATH, GPU_PATH]
+    assert len(stt.asked) == 2
+    assert len(_of(TranscriptFinal, events)) == 2
+    assert [e.code for e in _of(ErrorEvent, events)] == ["speech_engine_unavailable"]
+
+
+async def test_gpu_read_timeout_is_stt_failed(
+    session: ConversationSession,
+    speech: SpeechService,
+    gpu: FakeGpu,
+    stt: FakeStt,
+    events: list[ServerEvent],
+) -> None:
+    """Review Focus 2: a server that is up but slow, or answers with an error, is no reason
+    to leave it."""
+    _on_the_gpu(speech)
+    gpu.error = ProviderError("connection", "http://localhost:8002/v1 did not answer in time.")
+    await session.handle(SessionStart())
+    await _say(session)
+    await _settle()
+    gpu.error = None
+    await _say(session)
+    await _settle()
+
+    assert gpu.asked == [GPU_PATH, GPU_PATH]
+    assert stt.asked == []
+    [error] = _of(ErrorEvent, events)
+    assert (error.code, error.retryable) == ("stt_failed", True)
+    assert error.message.endswith("did not answer in time.")
+    assert len(_of(TranscriptFinal, events)) == 1
+
+
+async def test_speaches_unreachable_is_stt_failed(
+    session: ConversationSession, stt: FakeStt, events: list[ServerEvent]
+) -> None:
+    """Speaches has no fallback: the turn fails, and the next one tries it again."""
+    stt.error = EngineUnreachable("http://localhost:8000/v1")
+    await session.handle(SessionStart())
+    await _say(session)
+    await _settle()
+
+    assert [e.code for e in _of(ErrorEvent, events)] == ["stt_failed"]

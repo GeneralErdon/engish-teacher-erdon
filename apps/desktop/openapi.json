@@ -414,7 +414,8 @@
           "tts_failed",
           "no_speech",
           "audio_too_short",
-          "speech_model_missing"
+          "speech_model_missing",
+          "speech_engine_unavailable"
         ],
         "type": "string"
       },
@@ -1406,12 +1407,16 @@
           "recognition": {
             "$ref": "#/components/schemas/ModelStatus"
           },
+          "recognition_engine": {
+            "$ref": "#/components/schemas/SttEngine"
+          },
           "synthesis": {
             "$ref": "#/components/schemas/ModelStatus"
           }
         },
         "required": [
           "recognition",
+          "recognition_engine",
           "synthesis"
         ],
         "title": "SpeechStatus",

@@ -215,6 +215,7 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
         model_ready: true,
         detail: null,
       },
+      recognition_engine: 'openai',
       synthesis: {
         base_url: 'http://localhost:8000/v1',
         model: 'speaches-ai/Kokoro-82M-v1.0-ONNX',

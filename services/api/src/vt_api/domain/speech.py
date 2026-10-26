@@ -44,14 +44,30 @@ class VoiceChoice:
 
 
 @dataclass(frozen=True, slots=True)
+class Recognition:
+    """The engine and model that transcribe the learner."""
+
+    engine: SttEngine
+    model: str
+    """The catalog id, which measured speed and warnings name."""
+    server_model: str
+    """What the server is asked for: the model id on Speaches; on whisper.cpp, the file's path
+    relative to the models folder (`ModelFiles.snapshot_path`)."""
+
+
+@dataclass(frozen=True, slots=True)
 class SessionSpeech:
     """What one conversation uses, fixed when it starts."""
 
-    stt_model: str
+    recognition: Recognition
     voice: VoiceChoice
     max_turn_s: int
     missing: tuple[SpeechKind, ...] = ()
     """Kinds whose saved model was not installed: the default stands in."""
+    fallback: Recognition | None = None
+    """Speaches, while the GPU transcribes: it takes over if the GPU server stops answering."""
+    engine_unavailable: SttEngine | None = None
+    """The chosen engine, when it cannot transcribe this conversation: Speaches stands in."""
 
 
 def _recognition(

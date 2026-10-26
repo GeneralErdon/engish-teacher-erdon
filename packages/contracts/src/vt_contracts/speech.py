@@ -30,6 +30,9 @@ class SpeechStatus(BaseModel):
 
     recognition: ModelStatus
     """Speech-to-text: the learner's voice."""
+    recognition_engine: SttEngine
+    """The engine `recognition` is on: the chosen one, or Speaches when whisper.cpp (GPU)
+    cannot transcribe now."""
     synthesis: ModelStatus
     """Text-to-speech: the tutor's voice."""
 

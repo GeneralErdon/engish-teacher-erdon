@@ -19,6 +19,7 @@ from vt_api.domain.audio import to_wav
 from vt_api.domain.llm import ProviderError
 from vt_api.domain.speech import (
     CatalogEntry,
+    Recognition,
     SessionSpeech,
     SpeechSettingsError,
     VoiceChoice,
@@ -166,7 +167,7 @@ class SpeechService:
     async def view(self) -> SpeechSettingsView:
         saved = await self._repository.load()
         settings = saved or self._defaults
-        missing = (await self._session(settings)).missing
+        missing = (await self._session(settings, load=False)).missing
         return self._view(settings, saved=saved is not None, missing=missing)
 
     async def save(self, settings: SpeechSettings) -> SpeechSettingsView:
@@ -190,7 +191,7 @@ class SpeechService:
                         422, f"{settings.tts_model} has no voice {settings.tts_voice!r}."
                     )
             await self._store(settings, current)
-        missing = (await self._session(settings)).missing
+        missing = (await self._session(settings, load=False)).missing
         return self._view(settings, saved=True, missing=missing)
 
     async def models(self) -> SpeechModels:
@@ -302,14 +303,18 @@ class SpeechService:
         return to_wav(pcm, OUTPUT_SAMPLE_RATE_HZ)
 
     async def for_session(self) -> SessionSpeech:
-        """The choice for a conversation that starts now."""
-        return await self._session(await self._settings())
+        """The choice for a conversation that starts now. On whisper.cpp (GPU), the server
+        loads the model now, so a model that does not load shows before the learner speaks."""
+        return await self._session(await self._settings(), load=True)
 
-    async def transcribe(self, wav: bytes, audio_s: float, model: str) -> str:
-        """Raises `ProviderError`. Records how long `model` took, for the turn-length estimate."""
+    async def transcribe(self, wav: bytes, audio_s: float, recognition: Recognition) -> str:
+        """Raises `ProviderError`, `EngineUnreachable` when the GPU server is gone. Records how
+        long `recognition.model` took, for the turn-length estimate."""
         started = self._clock()
-        text = await self._stt.transcribe(wav, model, transcription_timeout_s(audio_s))
-        measured = self._measured.setdefault(model, _Measured())
+        text = await self._recognizer(recognition.engine).transcribe(
+            wav, recognition.server_model, transcription_timeout_s(audio_s)
+        )
+        measured = self._measured.setdefault(recognition.model, _Measured())
         measured.audio_s += audio_s
         measured.ms += (self._clock() - started) * 1000
         return text
@@ -319,12 +324,17 @@ class SpeechService:
 
     async def status(self) -> SpeechStatus:
         """Whether the models a conversation would use now are ready on their servers: a saved
-        model that is not installed gives way to its default, as in `for_session`."""
-        session = await self.for_session()
+        model that is not installed gives way to its default, and an engine that cannot
+        transcribe to Speaches, as in `for_session` (which alone loads the GPU model)."""
+        session = await self._session(await self._settings(), load=False)
+        used = session.recognition
         recognition, synthesis = await asyncio.gather(
-            self._stt.status(session.stt_model), self._tts.status(session.voice.model)
+            self._recognizer(used.engine).status(used.model),
+            self._tts.status(session.voice.model),
         )
-        return SpeechStatus(recognition=recognition, synthesis=synthesis)
+        return SpeechStatus(
+            recognition=recognition, recognition_engine=used.engine, synthesis=synthesis
+        )
 
     async def aclose(self) -> None:
         """Stop the download in progress, so its child process and files do not outlive us."""
@@ -344,25 +354,61 @@ class SpeechService:
             pending=[running.entry.model_id] if running is not None and running.activate else [],
         )
 
-    async def _session(self, settings: SpeechSettings) -> SessionSpeech:
+    async def _session(self, settings: SpeechSettings, *, load: bool) -> SessionSpeech:
         """A saved model that is no longer installed gives way to its track's default.
-        Conversations transcribe on Speaches."""
-        tracks = (_SPEACHES, _VOICE)
-        used = await asyncio.gather(
-            *(self._installed_or_default(track, _model(settings, track)) for track in tracks)
+
+        With `stt_engine` whisper.cpp, the GPU transcribes when it can (see `_on_the_gpu`), with
+        Speaches as the fallback; when it cannot, Speaches does, and `engine_unavailable` says
+        so. `load` is for a conversation that starts: only it makes the GPU server load a model.
+        """
+        stt_model, tts_model, gpu = await asyncio.gather(
+            self._installed_or_default(_SPEACHES, settings.stt_model),
+            self._installed_or_default(_VOICE, settings.tts_model),
+            self._on_the_gpu(settings, load=load),
         )
-        stt_model, tts_model = used
+        speaches = Recognition("openai", stt_model, stt_model)
+        recognition = gpu if gpu is not None else speaches
+        missing: list[SpeechKind] = []
+        # Each engine keeps its own model: compare with the saved one of the engine in use.
+        if recognition.model != _model(settings, ("recognition", recognition.engine)):
+            missing.append("recognition")
+        if tts_model != settings.tts_model:
+            missing.append("voice")
         voice = settings.tts_voice if tts_model == settings.tts_model else self._defaults.tts_voice
         return SessionSpeech(
-            stt_model=stt_model,
+            recognition=recognition,
             voice=_voice_choice(tts_model, voice, settings.tts_speed),
             max_turn_s=settings.max_turn_s,
-            missing=tuple(
-                track[0]
-                for track, model in zip(tracks, used, strict=True)
-                if model != _model(settings, track)
+            missing=tuple(missing),
+            fallback=speaches if gpu is not None else None,
+            engine_unavailable=(
+                "whispercpp" if settings.stt_engine == "whispercpp" and gpu is None else None
             ),
         )
+
+    async def _on_the_gpu(self, settings: SpeechSettings, *, load: bool) -> Recognition | None:
+        """The GPU recognition, when `stt_engine` is whisper.cpp and it can transcribe: the
+        engine is usable (see `_gpu`), its server runs, and the models folder has the saved
+        model, or else the GPU default. With `load`, the server loads it now: a `ProviderError`
+        there (the file did not load, and the server exited) counts as unavailable."""
+        gpu, files = self._gpu_stt, self._files
+        if settings.stt_engine != "whispercpp" or gpu is None or files is None:
+            return None
+        if not await gpu.running():
+            return None
+        saved, default = settings.stt_gpu_model, self._default(_GPU)
+        present = await files.present({saved, default})
+        model = next((choice for choice in (saved, default) if choice in present), None)
+        path = await files.snapshot_path(model) if model is not None else None
+        if model is None or path is None:  # `path`: the file went since `present` saw it
+            return None
+        if load:
+            try:
+                await gpu.load(path)
+            except ProviderError as error:
+                logger.warning("whisper.cpp (GPU) could not load %s: %s", model, error.message)
+                return None
+        return Recognition("whispercpp", model, path)
 
     async def _installed_or_default(self, track: _Track, model_id: str) -> str:
         """`model_id`, unless the server says it is not installed (when it does not answer, a
@@ -415,6 +461,11 @@ class SpeechService:
     def _gpu(self) -> GpuSpeechToText | None:
         """The GPU engine when it is usable: it needs the models folder to find its files."""
         return self._gpu_stt if self._files is not None else None
+
+    def _recognizer(self, engine: SttEngine) -> SpeechToText:
+        """The adapter of `engine`. `_session` picks whisper.cpp only when there is one."""
+        gpu = self._gpu_stt
+        return gpu if engine == "whispercpp" and gpu is not None else self._stt
 
     async def _gpu_running(self) -> bool:
         gpu = self._gpu()

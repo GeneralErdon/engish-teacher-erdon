@@ -275,7 +275,7 @@ async def test_the_status_reports_the_selected_models(
 
     status = (await client.get("/v1/speech/status")).json()
 
-    assert status["recognition"]["model"] == SMALL
+    assert (status["recognition_engine"], status["recognition"]["model"]) == ("openai", SMALL)
     assert status["synthesis"]["model"] == KOKORO
 
 

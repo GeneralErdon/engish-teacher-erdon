@@ -19,6 +19,7 @@ from vt_api.adapters.sql.database import Database
 from vt_api.adapters.sql.speech_settings import SqlSpeechSettingsRepository
 from vt_api.domain.llm import ProviderError
 from vt_api.domain.speech import (
+    Recognition,
     SessionSpeech,
     SpeechSettingsError,
     VoiceChoice,
@@ -46,6 +47,9 @@ ALBA = "speaches-ai/piper-en_GB-alba-medium"
 SMALL_Q8 = "ggerganov/whisper.cpp/ggml-small.en-q8_0.bin"  # the GPU default
 MEDIUM_Q5 = "ggerganov/whisper.cpp/ggml-medium.en-q5_0.bin"
 TURBO_Q5 = "ggerganov/whisper.cpp/ggml-large-v3-turbo-q5_0.bin"
+SMALL_Q8_PATH = f"snapshots/{SMALL_Q8}"  # where `FakeFiles` has it
+ON_SPEACHES = Recognition("openai", WHISPER, WHISPER)
+ON_THE_GPU = Recognition("whispercpp", SMALL_Q8, SMALL_Q8_PATH)
 GPU_KEYS = [
     "whispercpp-base-en",
     "whispercpp-small-en-q8",
@@ -62,6 +66,7 @@ HEART = Voice(id="af_heart", name="Heart", accent="american", gender="female")
 EMMA = Voice(id="bf_emma", name="Emma", accent="british", gender="female")
 ALBA_VOICE = Voice(id="alba", name="Alba", accent="british", gender="female")
 UNREACHABLE = ProviderError("connection", "Could not connect to http://localhost:8000.")
+LOAD_FAILED = ProviderError("connection", "Could not connect to http://localhost:8002/v1.")
 
 
 class FakeServer:
@@ -193,7 +198,11 @@ class FakeGpu:
         self.up = True
         self.loaded: list[str] = []
         """The model paths `load` was asked for, in order."""
+        self.load_error: ProviderError | None = None
+        """Raised by `load`: the file did not load (the server exits, dropping the connection)."""
         self.text = "Hello from the GPU"
+        self.asked: list[tuple[str, float]] = []
+        """The model path and timeout of each transcription."""
 
     async def running(self) -> bool:
         await asyncio.sleep(0)  # an HTTP call: other requests run meanwhile
@@ -201,8 +210,11 @@ class FakeGpu:
 
     async def load(self, model: str) -> None:
         self.loaded.append(model)
+        if self.load_error is not None:
+            raise self.load_error
 
     async def transcribe(self, wav: bytes, model: str, timeout_s: float) -> str:
+        self.asked.append((model, timeout_s))
         return self.text
 
     async def status(self, model: str) -> ModelStatus:
@@ -438,8 +450,8 @@ async def test_models_merge_catalog_installed_downloading_and_measured(
     await files.started()
     stt.transcribe.return_value = "Hello"
     clock.readings = iter([0.0, 1.0, 5.0, 8.0])  # 1000 ms, then 3000 ms
-    await service.transcribe(b"wav", 2.0, WHISPER)
-    await service.transcribe(b"wav", 4.0, WHISPER)
+    await service.transcribe(b"wav", 2.0, ON_SPEACHES)
+    await service.transcribe(b"wav", 4.0, ON_SPEACHES)
 
     models = await service.models()
 
@@ -767,13 +779,13 @@ async def test_for_session_falls_back_to_default_when_missing(
         )
     )
     assert await service.for_session() == SessionSpeech(
-        SMALL, VoiceChoice(ALBA, "alba", 1.1, 24_000), 180
+        Recognition("openai", SMALL, SMALL), VoiceChoice(ALBA, "alba", 1.1, 24_000), 180
     )
 
     installed.difference_update({SMALL, ALBA})  # removed with Speaches' own tools
 
     assert await service.for_session() == SessionSpeech(
-        WHISPER, VoiceChoice(KOKORO, "af_heart", 1.1), 180, missing=("recognition", "voice")
+        ON_SPEACHES, VoiceChoice(KOKORO, "af_heart", 1.1), 180, missing=("recognition", "voice")
     )
     view = await service.view()
     assert (view.stt_model, view.tts_model, view.missing) == (SMALL, ALBA, ["recognition", "voice"])
@@ -798,7 +810,9 @@ async def test_transcribe_uses_the_growing_timeout(
 ) -> None:
     stt.transcribe.return_value = "Hello there"
 
-    assert await service.transcribe(b"wav", 90.0, SMALL) == "Hello there"
+    assert await service.transcribe(b"wav", 90.0, Recognition("openai", SMALL, SMALL)) == (
+        "Hello there"
+    )
 
     stt.transcribe.assert_awaited_once_with(b"wav", SMALL, transcription_timeout_s(90.0))
 
@@ -809,7 +823,7 @@ async def test_a_failed_transcription_is_not_measured(
     stt.transcribe.side_effect = UNREACHABLE
 
     with pytest.raises(ProviderError):
-        await service.transcribe(b"wav", 2.0, WHISPER)
+        await service.transcribe(b"wav", 2.0, ON_SPEACHES)
 
     assert _row(await service.models(), WHISPER).ms_per_audio_s is None
 
@@ -923,7 +937,7 @@ async def test_for_session_keeps_the_choice_when_the_server_does_not_answer(
 
     session = await service.for_session()
 
-    assert (session.stt_model, session.missing) == (SMALL, ())
+    assert (session.recognition.model, session.missing) == (SMALL, ())
     assert (await service.view()).missing == []
 
 
@@ -1032,6 +1046,7 @@ async def test_status_is_of_the_models_in_use(
 
     status = await service.status()
     assert (status.recognition.model, status.synthesis.model) == (SMALL, ALBA)
+    assert status.recognition_engine == "openai"
 
     installed.discard(SMALL)  # a voice turn falls back to the default: so does the status
     status = await service.status()
@@ -1416,3 +1431,171 @@ async def test_a_gpu_model_cannot_be_chosen_without_the_models_folder(
         "whisper.cpp (GPU) needs VT_SPEECH_MODELS_DIR, the models folder it shares with the api "
         "(see docs/configuration.md)."
     )
+
+
+# ---------------------------------------------------------------- conversations and engines
+
+
+async def test_session_uses_the_gpu_and_loads_its_model(
+    service: SpeechService, speech_defaults: SpeechSettings, installed: set[str], gpu: FakeGpu
+) -> None:
+    installed.add(SMALL_Q8)
+    await service.save(speech_defaults.model_copy(update={"stt_engine": "whispercpp"}))
+
+    session = await service.for_session()
+
+    assert session.recognition == ON_THE_GPU
+    assert gpu.loaded == [SMALL_Q8_PATH]
+    assert session.fallback == ON_SPEACHES
+    assert (session.missing, session.engine_unavailable) == ((), None)
+
+
+async def test_a_speaches_session_never_asks_the_gpu(
+    service: SpeechService, installed: set[str], gpu: FakeGpu
+) -> None:
+    installed.add(SMALL_Q8)
+
+    session = await service.for_session()
+
+    assert (session.recognition, session.fallback, session.engine_unavailable) == (
+        ON_SPEACHES,
+        None,
+        None,
+    )
+    assert gpu.loaded == []
+
+
+async def test_view_and_status_do_not_load(
+    service: SpeechService,
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+    gpu: FakeGpu,
+    tts: NonCallableMagicMock,
+) -> None:
+    """Loading swaps the model in GPU memory: only a conversation that starts does it."""
+    tts.status.return_value = ModelStatus(
+        base_url="http://localhost:8000/v1", model=KOKORO, reachable=True, model_ready=True
+    )
+    installed.add(SMALL_Q8)
+    chosen = speech_defaults.model_copy(update={"stt_engine": "whispercpp"})
+
+    await service.save(chosen)
+    await service.save(chosen.model_copy(update={"tts_speed": 1.2}))
+    await service.view()
+    await service.status()
+
+    assert gpu.loaded == []
+
+
+@pytest.mark.parametrize(
+    "cause", ["stopped", "load fails", "no model file", "no models folder", "no GPU engine"]
+)
+async def test_session_falls_back_when_the_gpu_is_stopped(
+    build: Callable[..., SpeechService],
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+    gpu: FakeGpu,
+    cause: str,
+) -> None:
+    """Review Focus 2, 3 and 4: the saved engine (here `VT_STT_BACKEND`) cannot transcribe, so
+    Speaches does, and the conversation says so."""
+    installed.add(SMALL_Q8)
+    changes: dict[str, Any] = {
+        "defaults": speech_defaults.model_copy(update={"stt_engine": "whispercpp"})
+    }
+    match cause:
+        case "stopped":
+            gpu.up = False
+        case "load fails":
+            gpu.load_error = LOAD_FAILED
+        case "no model file":
+            installed.discard(SMALL_Q8)
+        case "no models folder":
+            changes["files"] = None
+        case "no GPU engine":
+            changes["gpu_stt"] = None
+    service = build(**changes)
+
+    session = await service.for_session()
+
+    assert (session.recognition, session.fallback, session.engine_unavailable) == (
+        ON_SPEACHES,
+        None,
+        "whispercpp",
+    )
+    assert session.missing == ()
+    assert (await service.view()).missing == []
+    await service.aclose()
+
+
+async def test_missing_gpu_model_uses_the_gpu_default(
+    service: SpeechService, speech_defaults: SpeechSettings, installed: set[str], gpu: FakeGpu
+) -> None:
+    installed |= {SMALL_Q8, MEDIUM_Q5}
+    await service.save(
+        speech_defaults.model_copy(update={"stt_engine": "whispercpp", "stt_gpu_model": MEDIUM_Q5})
+    )
+    installed.discard(MEDIUM_Q5)  # removed by hand
+
+    session = await service.for_session()
+
+    assert (session.recognition, session.missing) == (ON_THE_GPU, ("recognition",))
+    assert gpu.loaded == [SMALL_Q8_PATH]
+    view = await service.view()
+    assert (view.stt_gpu_model, view.missing) == (MEDIUM_Q5, ["recognition"])
+
+
+async def test_the_chosen_gpu_model_is_used_when_present(
+    service: SpeechService, speech_defaults: SpeechSettings, installed: set[str], gpu: FakeGpu
+) -> None:
+    installed |= {SMALL_Q8, MEDIUM_Q5}
+    await service.save(
+        speech_defaults.model_copy(update={"stt_engine": "whispercpp", "stt_gpu_model": MEDIUM_Q5})
+    )
+
+    session = await service.for_session()
+
+    assert session.recognition == Recognition("whispercpp", MEDIUM_Q5, f"snapshots/{MEDIUM_Q5}")
+    assert (gpu.loaded, session.missing) == ([f"snapshots/{MEDIUM_Q5}"], ())
+
+
+async def test_transcribe_with_the_gpu_records_its_speed(
+    service: SpeechService, gpu: FakeGpu, stt: NonCallableMagicMock, clock: Clock
+) -> None:
+    clock.readings = iter([0.0, 0.5])  # 500 ms
+
+    assert await service.transcribe(b"wav", 2.0, ON_THE_GPU) == "Hello from the GPU"
+
+    assert gpu.asked == [(SMALL_Q8_PATH, transcription_timeout_s(2.0))]
+    stt.transcribe.assert_not_awaited()
+    models = await service.models()
+    assert _row(models, SMALL_Q8).ms_per_audio_s == 250.0  # keyed by the model id, not the path
+    assert _row(models, WHISPER).ms_per_audio_s is None
+
+
+async def test_status_reports_the_engine_in_use(
+    service: SpeechService,
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+    gpu: FakeGpu,
+    stt: NonCallableMagicMock,
+    tts: NonCallableMagicMock,
+) -> None:
+    def ready(model: str) -> ModelStatus:
+        return ModelStatus(
+            base_url="http://localhost:8000/v1", model=model, reachable=True, model_ready=True
+        )
+
+    stt.status.side_effect = ready
+    tts.status.side_effect = ready
+    installed.add(SMALL_Q8)
+    await service.save(speech_defaults.model_copy(update={"stt_engine": "whispercpp"}))
+
+    status = await service.status()
+    assert (status.recognition_engine, status.recognition.model) == ("whispercpp", SMALL_Q8)
+    assert status.recognition.base_url == "http://localhost:8002/v1"  # the GPU server's
+
+    gpu.up = False  # a conversation would fall back to Speaches: so does the status
+    status = await service.status()
+    assert (status.recognition_engine, status.recognition.model) == ("openai", WHISPER)
+    assert status.synthesis.model == KOKORO
