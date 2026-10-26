@@ -19,6 +19,7 @@ from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
 from vt_api.config import Settings
 from vt_api.container import Container
 from vt_api.domain.llm import environment_config
+from vt_api.domain.speech import SessionSpeech, VoiceChoice
 from vt_api.main import create_app
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
@@ -96,8 +97,9 @@ def client(database: Database, learner_service: LearnerService) -> TestClient:
     container = Container(
         llm=llm,
         learner=learner_service,
-        stt=OpenAISpeechToText(speech_client("http://stt/v1"), "whisper"),
-        tts=OpenAITextToSpeech(speech_client("http://tts/v1"), "kokoro", "af_heart", 1.0),
+        stt=OpenAISpeechToText(speech_client("http://stt/v1")),
+        tts=OpenAITextToSpeech(speech_client("http://tts/v1")),
+        session_speech=SessionSpeech("whisper", VoiceChoice("kokoro", "af_heart", 1.0), 120),
     )
     return TestClient(create_app(Settings(_env_file=None), container=container))
 

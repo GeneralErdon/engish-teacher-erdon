@@ -17,6 +17,7 @@ from typing import Literal, assert_never
 
 from vt_api.domain.audio import duration_s, to_wav
 from vt_api.domain.llm import PROVIDERS, ChatMessage, ProviderError
+from vt_api.domain.speech import SessionSpeech, VoiceChoice, transcription_timeout_s
 from vt_api.ports.llm import ChatModel
 from vt_api.ports.speech import SpeechToText, TextToSpeech
 from vt_api.realtime.sentences import SentenceSplitter, speakable
@@ -78,6 +79,7 @@ class ConversationSession:
         learner: LearnerService,
         stt: SpeechToText,
         tts: TextToSpeech,
+        speech: SessionSpeech,
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self._send = send
@@ -86,6 +88,7 @@ class ConversationSession:
         self._learner = learner
         self._stt = stt
         self._tts = tts
+        self._speech = speech
         self._clock = clock
         self._started: _Started | None = None
         self._speak = False
@@ -154,7 +157,11 @@ class ConversationSession:
     async def _run_voice(self, pcm: bytes) -> None:
         since = self._clock()
         try:
-            text = await self._stt.transcribe(to_wav(pcm))
+            text = await self._stt.transcribe(
+                to_wav(pcm),
+                self._speech.stt_model,
+                transcription_timeout_s(duration_s(len(pcm))),
+            )
         except ProviderError as error:
             await self._error("stt_failed", f"Speech recognition failed. {error.message}")
             return
@@ -213,7 +220,12 @@ class ConversationSession:
         messages = reply_messages(self._history[-HISTORY_LIMIT:], started.profile, started.topic)
         speaker = (
             _Speaker(
-                self._tts, self._send, self._send_audio, turn_id, lambda: self._elapsed_ms(since)
+                self._tts,
+                self._speech.voice,
+                self._send,
+                self._send_audio,
+                turn_id,
+                lambda: self._elapsed_ms(since),
             )
             if self._speak
             else None
@@ -287,12 +299,14 @@ class _Speaker:
     def __init__(
         self,
         tts: TextToSpeech,
+        voice: VoiceChoice,
         send: Send,
         send_audio: SendAudio,
         turn_id: str,
         elapsed_ms: Callable[[], int],
     ) -> None:
         self._tts = tts
+        self._voice = voice
         self._send = send
         self._send_audio = send_audio
         self._turn_id = turn_id
@@ -322,7 +336,7 @@ class _Speaker:
         try:
             while (sentence := await self._queue.get()) is not None:
                 if text := speakable(sentence):
-                    async for pcm in self._tts.synthesize(text):
+                    async for pcm in self._tts.synthesize(text, self._voice):
                         await self._audio(pcm)
         except ProviderError as error:
             # The reply goes on as text only.

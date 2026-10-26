@@ -54,7 +54,13 @@ async def session_socket(websocket: WebSocket) -> None:
     stt: SpeechToText = state.container.stt
     tts: TextToSpeech = state.container.tts
     session = ConversationSession(
-        send=send, send_audio=send_audio, llm=llm, learner=learner, stt=stt, tts=tts
+        send=send,
+        send_audio=send_audio,
+        llm=llm,
+        learner=learner,
+        stt=stt,
+        tts=tts,
+        speech=state.container.session_speech,
     )
     try:
         # The client may go away while a reply is being sent: that ends the session too.

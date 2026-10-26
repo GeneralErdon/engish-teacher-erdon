@@ -4,6 +4,7 @@ import asyncio
 
 from fastapi import APIRouter, Request
 
+from vt_api.domain.speech import SessionSpeech
 from vt_api.ports.speech import SpeechToText, TextToSpeech
 from vt_contracts.speech import SpeechStatus
 
@@ -16,5 +17,8 @@ async def speech_status(request: Request) -> SpeechStatus:
     voice, text-to-speech for the tutor's."""
     stt: SpeechToText = request.app.state.container.stt
     tts: TextToSpeech = request.app.state.container.tts
-    recognition, synthesis = await asyncio.gather(stt.status(), tts.status())
+    speech: SessionSpeech = request.app.state.container.session_speech
+    recognition, synthesis = await asyncio.gather(
+        stt.status(speech.stt_model), tts.status(speech.voice.model)
+    )
     return SpeechStatus(recognition=recognition, synthesis=synthesis)

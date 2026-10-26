@@ -3,26 +3,27 @@
 from collections.abc import AsyncIterator
 from typing import Protocol
 
+from vt_api.domain.speech import VoiceChoice
 from vt_contracts.speech import DownloadProgress, ModelStatus, SpeechSettings, Voice
 
 
 class SpeechToText(Protocol):
-    async def transcribe(self, wav: bytes) -> str:
-        """The English text spoken in `wav`. Raises `ProviderError`."""
+    async def transcribe(self, wav: bytes, model: str, timeout_s: float) -> str:
+        """The English text spoken in `wav`, within `timeout_s`. Raises `ProviderError`."""
         ...
 
-    async def status(self) -> ModelStatus:
-        """Whether the server answers and has the model; never raises."""
+    async def status(self, model: str) -> ModelStatus:
+        """Whether the server answers and has `model`; never raises."""
         ...
 
 
 class TextToSpeech(Protocol):
-    def synthesize(self, text: str) -> AsyncIterator[bytes]:
+    def synthesize(self, text: str, voice: VoiceChoice) -> AsyncIterator[bytes]:
         """`text` spoken as PCM16 little-endian mono at `OUTPUT_SAMPLE_RATE_HZ`, streamed as it
         is produced, in chunks of whole samples. Raises `ProviderError`."""
         ...
 
-    async def status(self) -> ModelStatus:
+    async def status(self, model: str) -> ModelStatus:
         """Whether the server answers and has the model; never raises."""
         ...
 

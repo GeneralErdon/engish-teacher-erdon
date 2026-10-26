@@ -13,21 +13,21 @@ mistaking an accent for another language)."""
 
 
 class OpenAISpeechToText:
-    def __init__(self, client: openai.AsyncOpenAI, model: str) -> None:
+    def __init__(self, client: openai.AsyncOpenAI) -> None:
         self._client = client
-        self._model = model
 
-    async def transcribe(self, wav: bytes) -> str:
+    async def transcribe(self, wav: bytes, model: str, timeout_s: float) -> str:
         try:
             result = await self._client.audio.transcriptions.create(
-                model=self._model,
+                model=model,
                 file=("speech.wav", wav, "audio/wav"),
                 language=LANGUAGE,
                 response_format="json",
+                timeout=timeout_s,
             )
         except openai.APIError as error:
             raise provider_error(error, base_url(self._client)) from error
         return result.text.strip()
 
-    async def status(self) -> ModelStatus:
-        return await model_status(self._client, self._model)
+    async def status(self, model: str) -> ModelStatus:
+        return await model_status(self._client, model)

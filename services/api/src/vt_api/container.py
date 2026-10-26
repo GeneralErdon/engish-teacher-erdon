@@ -19,6 +19,7 @@ from vt_api.adapters.sql.learner_profile import SqlLearnerProfileRepository
 from vt_api.adapters.sql.llm_config import SqlLlmConfigRepository
 from vt_api.config import Settings
 from vt_api.domain.llm import environment_config
+from vt_api.domain.speech import SessionSpeech, VoiceChoice, entry_for
 from vt_api.ports.speech import SpeechToText, TextToSpeech
 from vt_api.services.learner import LearnerService
 from vt_api.services.llm import LlmService
@@ -26,10 +27,9 @@ from vt_contracts.learner import LearnerProfile
 
 logger = logging.getLogger(__name__)
 
-STT_TIMEOUT_S = 60.0
-"""A long turn on a slow CPU can take a while to transcribe."""
 TTS_TIMEOUT_S = 30.0
-"""Per read: the first sentence loads the voice model if the server unloaded it."""
+"""Per read (the first sentence loads the voice model if the server unloaded it), and the
+default for status calls; transcription sets its own."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +38,8 @@ class Container:
     learner: LearnerService
     stt: SpeechToText
     tts: TextToSpeech
+    session_speech: SessionSpeech
+    """What a conversation uses, from the settings; the saved choice replaces it later."""
 
 
 def _open_database(settings: Settings) -> Database:
@@ -78,14 +80,19 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
                 max_retries=0,
             )
 
-        stt = OpenAISpeechToText(
-            speech_client(settings.stt_base_url, STT_TIMEOUT_S), settings.stt_model
-        )
-        tts = OpenAITextToSpeech(
-            speech_client(settings.tts_base_url, TTS_TIMEOUT_S),
-            model=settings.tts_model,
-            voice=settings.tts_voice,
-            speed=settings.tts_speed,
+        stt = OpenAISpeechToText(speech_client(settings.stt_base_url, TTS_TIMEOUT_S))
+        tts = OpenAITextToSpeech(speech_client(settings.tts_base_url, TTS_TIMEOUT_S))
+        session_speech = SessionSpeech(
+            stt_model=settings.stt_model,
+            voice=VoiceChoice(
+                settings.tts_model,
+                settings.tts_voice,
+                settings.tts_speed,
+                sample_rate_hz=(
+                    entry.sample_rate_hz if (entry := entry_for(settings.tts_model)) else None
+                ),
+            ),
+            max_turn_s=settings.max_turn_s,
         )
         environment = environment_config(
             kind=settings.llm_provider,
@@ -108,4 +115,5 @@ async def build_container(settings: Settings) -> AsyncIterator[Container]:
             ),
             stt=stt,
             tts=tts,
+            session_speech=session_speech,
         )

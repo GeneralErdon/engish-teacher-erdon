@@ -11,6 +11,7 @@ import pytest
 from pydantic import SecretStr
 
 from vt_api.domain.llm import ChatMessage, LlmConfig, ProviderConfig, ProviderError
+from vt_api.domain.speech import SessionSpeech, VoiceChoice
 from vt_api.ports.llm import ChatModel
 from vt_api.realtime.session import ConversationSession
 from vt_api.services.learner import LearnerService
@@ -84,22 +85,30 @@ class ScriptedChat:
         return []
 
 
+SPEECH = SessionSpeech(
+    stt_model="whisper", voice=VoiceChoice("kokoro", "af_heart", 0.95), max_turn_s=120
+)
+
+
 @dataclass
 class FakeStt:
     text: str = "I have went to the beach"
     error: ProviderError | None = None
     hold: asyncio.Event | None = None
     heard: list[bytes] = field(default_factory=list)
+    asked: list[tuple[str, float]] = field(default_factory=list)
+    """The model and timeout of each transcription."""
 
-    async def transcribe(self, wav: bytes) -> str:
+    async def transcribe(self, wav: bytes, model: str, timeout_s: float) -> str:
         self.heard.append(wav)
+        self.asked.append((model, timeout_s))
         if self.hold:
             await self.hold.wait()
         if self.error:
             raise self.error
         return self.text
 
-    async def status(self) -> ModelStatus:
+    async def status(self, model: str) -> ModelStatus:
         raise NotImplementedError
 
 
@@ -113,9 +122,11 @@ class FakeTts:
     hold: asyncio.Event | None = None
     """When set, waits on it after the first word."""
     said: list[str] = field(default_factory=list)
+    voices: list[VoiceChoice] = field(default_factory=list)
 
-    async def synthesize(self, text: str) -> AsyncIterator[bytes]:
+    async def synthesize(self, text: str, voice: VoiceChoice) -> AsyncIterator[bytes]:
         self.said.append(text)
+        self.voices.append(voice)
         for index, word in enumerate(text.split()):
             if self.error and index == self.fail_after:
                 raise self.error
@@ -123,7 +134,7 @@ class FakeTts:
                 await self.hold.wait()
             yield word.encode()
 
-    async def status(self) -> ModelStatus:
+    async def status(self, model: str) -> ModelStatus:
         raise NotImplementedError
 
 
@@ -204,6 +215,7 @@ def session(
         learner=learner_service,
         stt=stt,
         tts=tts,
+        speech=SPEECH,
         clock=lambda: next(ticks) / 10,
     )
 

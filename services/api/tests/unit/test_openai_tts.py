@@ -9,8 +9,10 @@ import pytest
 
 from vt_api.adapters.openai_tts import OpenAITextToSpeech
 from vt_api.domain.llm import ProviderError
+from vt_api.domain.speech import VoiceChoice
 
 MODEL = "speaches-ai/Kokoro-82M-v1.0-ONNX"
+KOKORO = VoiceChoice(MODEL, "af_heart", 0.95)
 type Handler = Callable[[httpx2.Request], httpx2.Response]
 
 
@@ -35,7 +37,7 @@ async def tts(speaches: Speaches) -> AsyncIterator[OpenAITextToSpeech]:
     client = openai.AsyncOpenAI(
         api_key="none", base_url="http://localhost:8000/v1", http_client=http, max_retries=0
     )
-    yield OpenAITextToSpeech(client, MODEL, voice="af_heart", speed=0.95)
+    yield OpenAITextToSpeech(client)
     await http.aclose()
 
 
@@ -47,8 +49,10 @@ def _streamed(*chunks: bytes) -> httpx2.Response:
     return httpx2.Response(200, content=body(), headers={"content-type": "audio/pcm"})
 
 
-async def _speak(tts: OpenAITextToSpeech, text: str = "Nice!") -> list[bytes]:
-    return [chunk async for chunk in tts.synthesize(text)]
+async def _speak(
+    tts: OpenAITextToSpeech, text: str = "Nice!", voice: VoiceChoice = KOKORO
+) -> list[bytes]:
+    return [chunk async for chunk in tts.synthesize(text, voice)]
 
 
 async def test_streams_raw_pcm_from_kokoro(tts: OpenAITextToSpeech, speaches: Speaches) -> None:
@@ -65,6 +69,18 @@ async def test_streams_raw_pcm_from_kokoro(tts: OpenAITextToSpeech, speaches: Sp
         "response_format": "pcm",
         "speed": 0.95,
     }
+
+
+async def test_piper_asks_for_24k(tts: OpenAITextToSpeech, speaches: Speaches) -> None:
+    speaches.handler = lambda _request: _streamed(b"\x01\x00")
+    piper = VoiceChoice("speaches-ai/piper-en_US-lessac-medium", "lessac", 1.0, 24000)
+
+    await _speak(tts, voice=piper)
+    await _speak(tts)
+
+    with_rate, without_rate = (json.loads(r.content) for r in speaches.requests)
+    assert with_rate["sample_rate"] == 24000
+    assert "sample_rate" not in without_rate
 
 
 async def test_never_splits_a_sample(tts: OpenAITextToSpeech, speaches: Speaches) -> None:
@@ -99,6 +115,6 @@ async def test_status(tts: OpenAITextToSpeech, speaches: Speaches) -> None:
         200, json={"object": "list", "data": [model]}
     )
 
-    status = await tts.status()
+    status = await tts.status(MODEL)
 
     assert (status.model, status.model_ready) == (MODEL, True)
