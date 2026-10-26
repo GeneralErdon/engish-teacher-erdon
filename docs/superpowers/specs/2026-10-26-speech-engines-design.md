@@ -183,6 +183,7 @@ The Practice page shows the new warning through the existing alert, as it does f
   - the single-file additions to the download manager, as long as uninstall never deletes sibling files.
 - **Real hardware:** the image pin, and a manual test plan for the maintainer on both machines. The plan covers:
   - `just voice gpu`;
+  - checking that Vulkan sees the GPU (the `ggml_vulkan` devices in `docker compose logs stt-gpu`, as in [hardware.md](../../hardware.md));
   - picking the engine;
   - comparing the `heard` times on CPU and GPU;
   - switching GGML models;

@@ -61,7 +61,7 @@ voice-tutor/
 │       └── release.yml          # every merge into master: GitHub release + images to GHCR
 ├── docker/
 │   ├── caddy/Caddyfile          # optional HTTPS for LAN access
-│   └── whisper-vulkan/Dockerfile# whisper.cpp built with Vulkan (AMD/Intel)
+│   └── stt-gpu/start.sh         # starts whisper.cpp (Vulkan: AMD/Intel) on the chosen GGML model
 ├── packages/
 │   └── contracts/               # shared Pydantic models (WS protocol, pron API)
 │       └── src/vt_contracts/
@@ -86,7 +86,7 @@ voice-tutor/
 │   │   │   ├── adapters/
 │   │   │   │   ├── openai_models.py # is a speech server up, with our model downloaded?
 │   │   │   │   ├── openai_stt.py
-│   │   │   │   ├── whispercpp_stt.py
+│   │   │   │   ├── whispercpp.py    # whisper.cpp on the GPU: transcribe, /load, /health
 │   │   │   │   ├── openai_chat.py   # Chat Completions: OpenAI, Gemini, Ollama, llama.cpp, LM Studio...
 │   │   │   │   ├── anthropic_chat.py# Messages API: Anthropic and compatible servers
 │   │   │   │   ├── chat_factory.py  # provider settings → the right chat adapter

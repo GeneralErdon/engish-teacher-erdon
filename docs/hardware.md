@@ -41,12 +41,14 @@ extra_hosts:
 
 `stt-gpu` runs whisper.cpp with Vulkan, so any GPU with a Mesa driver (RADV for AMD, ANV for Intel) can transcribe, with no ROCm and no per-vendor image. It needs `/dev/dri`, so it is **Linux only**: Docker on Windows and macOS exposes only NVIDIA GPUs. Phase 4 runs the same engine natively.
 
+The Vulkan drivers are the Mesa ones inside the image, not the host's, and they must support your GPU. Check it once the server runs, as you would with `vulkaninfo`: `docker compose logs stt-gpu` names each GPU whisper.cpp found, under `ggml_vulkan: Found N Vulkan devices:`. No device, or only `llvmpipe` (a software renderer), means the image's Mesa does not drive your GPU: report it and use Speaches.
+
 - **Radeon RX 9060 XT:** `just up amd` (or `VT_PROFILE=amd`) starts it with the chat model on the same GPU.
 - **Intel Arc iGPU:** `VT_PROFILE=cpu` and `just voice gpu`, with a cloud or external chat model.
 
 Then pick **whisper.cpp · GPU** in **Settings → Voice** and compare the `heard` times with Speaches.
 
-**Caveat.** The pinned whisper.cpp image is built without `GGML_NATIVE=OFF`, so its CPU code may target the CPU of the machine that built it. If `docker compose logs stt-gpu` shows `Illegal instruction`, try the previous tag, `main-vulkan-7e26d3b0d5bced6c8217ef09710ec2f969001241`, in `compose.yaml`, and report it: a custom build is the fallback.
+**Caveat.** The pinned whisper.cpp image, like every older tag, is built from a Dockerfile without `-DGGML_NATIVE=OFF`, so its CPU code may target the CPU of the machine that built it. whisper.cpp's Dockerfile builds with `-DGGML_NATIVE=OFF` (and adds `libegl1`) from commit `231638a` (2026-10-26). Its `main-vulkan-<sha>` tags qualify for the project's 7-day rule from 2026-11-02, and the pin moves to one then. Until then, if `docker compose logs stt-gpu` shows `Illegal instruction`, report it and use Speaches, or build the image locally from whisper.cpp's `.devops/main-vulkan.Dockerfile`.
 
 ## Suggested models by VRAM
 

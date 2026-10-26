@@ -151,6 +151,8 @@ services:
     healthcheck:
       <<: *model-healthcheck
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/v1/health"]
+      # The model is on disk already (stt-gpu-model fetched it): loading it takes seconds.
+      start_period: 5m
     # After a failed /load the server exits; it comes back on the default model.
     restart: unless-stopped
 

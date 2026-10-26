@@ -682,6 +682,7 @@ Both use `speech_engine_unavailable`, with `retryable=True`.
 1. The final whole-branch review, as subagent-driven development prescribes.
 2. Push, and open the PR into `develop`. Its body carries the maintainer's manual test plan:
    - `just voice gpu` on the laptop (Arc 140V, `VT_PROFILE=cpu`, Ollama Cloud) and `just up amd` on the desktop (RX 9060 XT);
+   - check that Vulkan sees the GPU: the `ggml_vulkan` devices in `docker compose logs stt-gpu` (docs/hardware.md);
    - pick the engine;
    - compare the `heard` times on CPU and on GPU;
    - switch GGML models, and download, cancel and uninstall one;
