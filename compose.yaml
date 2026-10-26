@@ -47,6 +47,7 @@ services:
       pron: { condition: service_healthy }
       stt-cpu: { condition: service_started, required: false }
       stt-nvidia: { condition: service_started, required: false }
+      stt-gpu: { condition: service_started, required: false }
       llm-cpu: { condition: service_started, required: false }
       llm-nvidia: { condition: service_started, required: false }
       llm-amd: { condition: service_started, required: false }
@@ -107,8 +108,51 @@ services:
     healthcheck: *speaches-healthcheck
     restart: unless-stopped
 
-  # TODO(Phase 1): `amd` can use whisper.cpp built with Vulkan (docker/whisper-vulkan) instead
-  # of Speaches on CPU; it needs VT_STT_BACKEND=whispercpp and the whisper.cpp adapter.
+  # ------------------------------------------------------------------ speech (whisper.cpp, GPU)
+  # Speech recognition on the GPU through Vulkan (AMD, Intel), as a second engine next to Speaches:
+  # `just voice gpu` starts it, and Settings → Voice picks the engine. Linux only (/dev/dri).
+  # The image is built without GGML_NATIVE=OFF, so its CPU code may target its CI machine: if the
+  # container dies with "Illegal instruction", see docs/hardware.md.
+  # stt-gpu-model first fetches the GGML file into ./data/models (a no-op once it is there) with
+  # the Speaches image, which already has huggingface_hub. whisper.cpp loads it before the port
+  # opens, so the healthcheck waits. The api asks the server to load other models it downloaded.
+  stt-gpu-model:
+    image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu
+    profiles: [gpu, amd]
+    entrypoint:
+      - python
+      - -c
+      - |
+        import os, huggingface_hub
+        repo, file = os.environ["MODEL"].rsplit("/", 1)
+        huggingface_hub.hf_hub_download(repo, file)
+    environment:
+      MODEL: ${VT_STT_GPU_MODEL:-ggerganov/whisper.cpp/ggml-small.en-q8_0.bin}
+      HF_HUB_DISABLE_XET: "1"
+    volumes:
+      - ./data/models:/home/ubuntu/.cache/huggingface/hub
+    restart: "no"
+
+  stt-gpu:
+    image: ghcr.io/ggml-org/whisper.cpp:main-vulkan-0c7be696371069e0baa2515ed7aa08d5a5473aa6@sha256:4d25bb2f233afa2799642ffcb3e49dbb5586a3cbf7588f3ec7be727d9fa9acbd
+    profiles: [gpu, amd]
+    entrypoint: ["/bin/sh", "/opt/voice-tutor/start.sh"]
+    environment:
+      VT_STT_GPU_MODEL: ${VT_STT_GPU_MODEL:-ggerganov/whisper.cpp/ggml-small.en-q8_0.bin}
+    devices:
+      - /dev/dri:/dev/dri
+    ports:
+      - "127.0.0.1:8002:8080"
+    volumes:
+      - ./data/models:/models:ro
+      - ./docker/stt-gpu/start.sh:/opt/voice-tutor/start.sh:ro
+    depends_on:
+      stt-gpu-model: { condition: service_completed_successfully }
+    healthcheck:
+      <<: *model-healthcheck
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/v1/health"]
+    # After a failed /load the server exits; it comes back on the default model.
+    restart: unless-stopped
 
   # ------------------------------------------------------------------ chat model
   # llama.cpp server: downloads VT_LLM_HF_REPO from Hugging Face on first start and serves it

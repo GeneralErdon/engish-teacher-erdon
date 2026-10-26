@@ -137,16 +137,17 @@ models:
 [env("VT_SECRET_KEY_FILE", "data/secret.key")]
 [env("VT_SPEECH_MODELS_DIR", MODELS_DEV_DIR)]
 [env("VT_STT_BASE_URL", "http://localhost:8000/v1")]
+[env("VT_STT_GPU_BASE_URL", "http://localhost:8002/v1")]
 [env("VT_TTS_BASE_URL", "http://localhost:8000/v1")]
 [group('dev')]
 dev-api host="127.0.0.1":
     uv run uvicorn --factory vt_api.main:create_app --reload --reload-dir services/api/src --reload-dir packages/contracts/src --host {{ host }} --port 8080
 
-# Speech on this machine: Speaches on :8000, waits until its models are downloaded (~700 MB the first time)
+# Speech on this machine: Speaches on :8000, waits until its models are downloaded (~700 MB the first time). `just voice gpu` also starts whisper.cpp on the GPU (:8002), Linux only, for AMD or Intel GPUs
 [group('dev')]
-voice:
-    @echo "Starting Speaches. The first start downloads the speech models: docker compose logs -f {{ SPEECH }}"
-    docker compose --profile {{ PROFILE }} up -d --wait {{ SPEECH }}
+voice engine="":
+    @echo "{{ if engine == "gpu" { "Starting Speaches and whisper.cpp on the GPU. The first start downloads the models: docker compose logs -f " + SPEECH + " stt-gpu-model stt-gpu" } else if engine == "" { "Starting Speaches. The first start downloads the speech models: docker compose logs -f " + SPEECH } else { error("usage: just voice [gpu]") } }}"
+    docker compose --profile {{ PROFILE }} {{ if engine == "gpu" { "--profile gpu" } else { "" } }} up -d --wait {{ SPEECH }} {{ if engine == "gpu" { "stt-gpu" } else { "" } }}
 
 # Try it on your phone with a cloud chat model: `voice`, then the api and the HTTPS UI (`dev-lan`) together
 [group('dev')]

@@ -18,9 +18,12 @@ Variables use the `VT_` prefix and are validated at startup by `vt_api.config.Se
 | `VT_LLM_MODEL` | str | `gemma-3-4b-it-q4` | Model id as the endpoint expects it (matches the `cpu` profile; `gemma-3-12b-it-q4` for a 12–16 GB GPU) |
 | `VT_LLM_API_KEY` | secret | empty | Providers that need a key |
 | `VT_LLM_TEMPERATURE` | float 0–2 | `0.6` | Teacher creativity |
-| `VT_STT_BACKEND` | `openai \| whispercpp` | `openai` | Selects STT adapter |
+| `VT_STT_BACKEND` | `openai \| whispercpp` | `openai` | Default speech recognition engine until one is saved in Settings → Voice: `openai` is Speaches (CPU), `whispercpp` is whisper.cpp on the GPU ([GPU speech recognition](#gpu-speech-recognition-whispercpp)) |
 | `VT_STT_BASE_URL` | URL | `http://stt:8000/v1` | STT endpoint |
 | `VT_STT_MODEL` | str | `Systran/faster-distil-whisper-small.en` | Default speech-recognition model until you save one in Settings → Voice. Speaches model id, downloaded on Speaches' first start ([voice setup](#voice-setup)); on a GPU, `Systran/faster-whisper-large-v3-turbo` |
+| `VT_STT_GPU_BASE_URL` | URL | `http://stt-gpu:8080/v1` | The whisper.cpp server (`just dev-api` sets `http://localhost:8002/v1`) |
+| `VT_STT_GPU_MODELS_ROOT` | path | `/models` | Where the whisper.cpp server sees the models folder (`VT_SPEECH_MODELS_DIR`); the api tells it to load files from there |
+| `VT_STT_GPU_MODEL` | `org/name/file` | `ggerganov/whisper.cpp/ggml-small.en-q8_0.bin` | GGML model whisper.cpp starts with; `just voice gpu` downloads it. Also the one it falls back to after a failed load |
 | `VT_TTS_BASE_URL` | URL | `http://tts:8000/v1` | TTS endpoint: the same Speaches as STT. Any server with an OpenAI-compatible `/audio/speech` that streams raw PCM at 24 kHz works, e.g. Kokoro-FastAPI on port `8880` |
 | `VT_TTS_MODEL` | str | `speaches-ai/Kokoro-82M-v1.0-ONNX` | Default voice model until you save one in Settings → Voice. Kokoro on ONNX Runtime, downloaded once ([voice setup](#voice-setup)). Lighter (~120 MB): `speaches-ai/Kokoro-82M-v1.0-ONNX-int8`. Kokoro-FastAPI: `kokoro` |
 | `VT_TTS_VOICE` | str | `af_heart` | Default voice until you save one in Settings → Voice. Tutor voice: American (`af_*`, `am_*`) or British (`bf_*`, `bm_*`) English, e.g. `am_michael`, `bf_emma` |
@@ -83,6 +86,16 @@ How a spoken turn travels:
 - **Or call** (**Call** in Practice): no buttons between turns. The app listens all the time and sends what you said after ~1 s of silence; talk over the tutor and it stops. An orb follows whoever is talking, captions show the last exchange, and the corrections wait in the chat until you hang up. Voice activity detection (Silero VAD) runs in your browser, so the api only ever receives speech. Headphones work best; with speakers, echo cancellation keeps the tutor from interrupting itself.
 
 Each reply shows its latency: `heard` (speech recognition), `first word`, `first sound` and `reply`. **Voice to voice**, the Phase 0 target (< 1.5 s), is `heard + first sound`.
+
+### GPU speech recognition (whisper.cpp)
+
+On Linux with an AMD or Intel GPU, speech recognition can run on the GPU through [whisper.cpp](https://github.com/ggml-org/whisper.cpp) built with Vulkan, instead of Speaches on the CPU:
+
+```bash
+just voice gpu    # = docker compose --profile cpu --profile gpu up -d --wait stt-cpu stt-gpu
+```
+
+Speaches still serves the tutor's voice and stays the fallback. `stt-gpu-model` downloads `VT_STT_GPU_MODEL` (~250 MB) into `data/models` first, then `stt-gpu` serves it on `127.0.0.1:8002`. Pick **whisper.cpp · GPU** in **Settings → Voice**; the GGML models it offers are downloaded and removed there like the others, and the server loads the one you pick. If the GPU server is stopped, the conversation goes on with Speaches and shows one warning. `just up amd` starts it too. Hardware notes and a known caveat: [hardware](hardware.md#gpu-speech-recognition-linux).
 
 ### Chat model providers
 

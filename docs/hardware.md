@@ -18,7 +18,7 @@ So "the AMD problem" is really an **LLM (and optionally STT) problem**, not a vo
 |---|---|---|---|
 | `cpu` | llama.cpp server (CPU, small model) | Speaches CPU (`small.en`) | All |
 | `nvidia` | Ollama (CUDA) | Speaches CUDA (`large-v3-turbo`) | Linux, Windows via WSL2 |
-| `amd` | llama.cpp server built with **Vulkan** (`/dev/dri` passed through) | whisper.cpp built with Vulkan (`docker/whisper-vulkan`) or Speaches CPU | **Linux only** |
+| `amd` | llama.cpp server built with **Vulkan** (`/dev/dri` passed through) | Speaches CPU, plus `stt-gpu`: whisper.cpp built with Vulkan, selectable in Settings → Voice | **Linux only** |
 | `external` | Your native Ollama / LM Studio at `http://host.docker.internal:<port>/v1` | Speaches CPU | macOS, Windows + AMD, anyone who already runs a model server |
 
 ### Why not Ollama in Docker for AMD?
@@ -36,6 +36,17 @@ On Linux, the `api` service needs this to reach the host (Docker Desktop adds it
 extra_hosts:
   - "host.docker.internal:host-gateway"
 ```
+
+## GPU speech recognition (Linux)
+
+`stt-gpu` runs whisper.cpp with Vulkan, so any GPU with a Mesa driver (RADV for AMD, ANV for Intel) can transcribe, with no ROCm and no per-vendor image. It needs `/dev/dri`, so it is **Linux only**: Docker on Windows and macOS exposes only NVIDIA GPUs. Phase 4 runs the same engine natively.
+
+- **Radeon RX 9060 XT:** `just up amd` (or `VT_PROFILE=amd`) starts it with the chat model on the same GPU.
+- **Intel Arc iGPU:** `VT_PROFILE=cpu` and `just voice gpu`, with a cloud or external chat model.
+
+Then pick **whisper.cpp · GPU** in **Settings → Voice** and compare the `heard` times with Speaches.
+
+**Caveat.** The pinned whisper.cpp image is built without `GGML_NATIVE=OFF`, so its CPU code may target the CPU of the machine that built it. If `docker compose logs stt-gpu` shows `Illegal instruction`, try the previous tag, `main-vulkan-7e26d3b0d5bced6c8217ef09710ec2f969001241`, in `compose.yaml`, and report it: a custom build is the fallback.
 
 ## Suggested models by VRAM
 
