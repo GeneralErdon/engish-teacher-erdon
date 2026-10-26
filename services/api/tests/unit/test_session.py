@@ -10,8 +10,9 @@ from dataclasses import dataclass, field
 import pytest
 from pydantic import SecretStr
 
+from vt_api.domain.audio import duration_s
 from vt_api.domain.llm import ChatMessage, LlmConfig, ProviderConfig, ProviderError
-from vt_api.domain.speech import SessionSpeech, VoiceChoice
+from vt_api.domain.speech import SessionSpeech, VoiceChoice, transcription_timeout_s
 from vt_api.ports.llm import ChatModel
 from vt_api.realtime.session import ConversationSession
 from vt_api.services.learner import LearnerService
@@ -387,6 +388,9 @@ async def test_a_spoken_turn(
     assert (transcript.text, transcript.source) == ("I have went to the beach", "voice")
     assert transcript.stt_ms == 100  # one clock tick
     assert stt.heard[0].startswith(b"RIFF")
+    assert stt.asked == [
+        (SPEECH.stt_model, transcription_timeout_s(duration_s(len(HALF_A_SECOND))))
+    ]
     assert len(_of(Correction, events)) == 1
     assert len(_of(AssistantTextDone, events)) == 1
 
@@ -484,6 +488,7 @@ async def test_the_tutor_speaks_each_sentence_as_it_is_written(
     await _settle()
 
     assert tts.said == ["Nice!", "What did you do?"]
+    assert tts.voices == [SPEECH.voice, SPEECH.voice]
     assert audio == [b"Nice!", b"What", b"did", b"you", b"do?"]
     kinds = [event.type for event in events if event.type.startswith(("assistant.", "turn."))]
     assert kinds == [
