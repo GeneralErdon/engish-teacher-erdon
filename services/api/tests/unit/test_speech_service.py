@@ -342,6 +342,9 @@ async def test_turn_length_saves_while_speaches_is_down(
     saved = await service.save(chosen.model_copy(update={"max_turn_s": 300}))
 
     assert (saved.stt_model, saved.max_turn_s, saved.missing) == (SMALL, 300, [])
+    # The defaults are always installed: going back to them needs no check either.
+    saved = await service.save(speech_defaults)
+    assert (saved.stt_model, saved.tts_model, saved.source) == (WHISPER, KOKORO, "saved")
 
 
 async def test_changing_a_model_or_the_voice_still_checks_it(
