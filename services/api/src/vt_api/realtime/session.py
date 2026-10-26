@@ -149,9 +149,10 @@ class ConversationSession:
         )
         room = int(limit_s * INPUT_SAMPLE_RATE_HZ) * SAMPLE_WIDTH_BYTES - len(self._audio)
         if len(chunk) > room:
+            # The limit in bytes is whole samples: trimming to it ends the turn on one.
             self._audio_cut = True
-        kept = max(min(len(chunk), room), 0)
-        self._audio.extend(chunk[: kept - kept % SAMPLE_WIDTH_BYTES])
+            chunk = chunk[: max(room, 0)]
+        self._audio.extend(chunk)
 
     async def _commit_audio(self) -> None:
         pcm, cut = bytes(self._audio), self._audio_cut

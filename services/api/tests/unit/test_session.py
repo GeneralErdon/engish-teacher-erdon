@@ -500,16 +500,30 @@ async def test_a_chunk_across_the_limit_is_trimmed_to_it(
     assert _of(TranscriptFinal, events)[0].cut is True
 
 
-async def test_an_odd_sized_chunk_keeps_whole_samples(
+async def test_a_sample_split_across_chunks_stays_aligned(
     session: ConversationSession, stt: FakeStt, events: list[ServerEvent]
 ) -> None:
     await session.handle(SessionStart())
-    session.audio(bytes(16_001))  # the last byte is half a sample
+    session.audio(bytes(16_000) + bytes([1, 2, 3]))
+    session.audio(bytes([4, 5, 6]))
     await session.handle(InputCommit())
     await _settle()
 
-    assert len(stt.heard[0]) == 44 + 16_000
+    assert stt.heard[0][-6:] == bytes([1, 2, 3, 4, 5, 6])
     assert _of(TranscriptFinal, events)[0].cut is False
+
+
+async def test_the_cut_lands_on_the_limit_after_a_split_sample(
+    session: ConversationSession, saved_speech: SavedSpeech, stt: FakeStt
+) -> None:
+    saved_speech.saved = DEFAULTS.model_copy(update={"max_turn_s": 30})
+    await session.handle(SessionStart())
+    session.audio(bytes(31_999))  # an odd count: the buffer is mid-sample
+    session.audio(bytes(32_000 * 30))
+    await session.handle(InputCommit())
+    await _settle()
+
+    assert len(stt.heard[0]) == 44 + 32_000 * 30
 
 
 async def test_audio_after_the_cut_is_ignored(
