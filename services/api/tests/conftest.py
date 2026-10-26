@@ -10,6 +10,7 @@ from vt_api.adapters.sql.database import Database, open_database
 from vt_api.adapters.sql.learner_profile import SqlLearnerProfileRepository
 from vt_api.services.learner import LearnerService
 from vt_contracts.learner import LearnerProfile
+from vt_contracts.speech import SpeechSettings
 
 # Never touch the developer's real keyring: with this backend, there is none.
 os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"
@@ -43,4 +44,17 @@ def learner_service(database: Database) -> LearnerService:
         repository=SqlLearnerProfileRepository(database),
         environment=LearnerProfile(level="B1", explanations="native"),
         native_language="es",
+    )
+
+
+@pytest.fixture
+def speech_defaults() -> SpeechSettings:
+    """The speech settings when nothing is saved: the defaults of `VT_STT_MODEL`, `VT_TTS_*` and
+    `VT_MAX_TURN_S`."""
+    return SpeechSettings(
+        stt_model="Systran/faster-distil-whisper-small.en",
+        tts_model="speaches-ai/Kokoro-82M-v1.0-ONNX",
+        tts_voice="af_heart",
+        tts_speed=0.95,
+        max_turn_s=120,
     )
