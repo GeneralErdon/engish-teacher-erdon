@@ -174,8 +174,17 @@ class SpeechService:
             self._last_error = None
         return await self.models()
 
-    async def cancel_download(self) -> None:
-        """Stop the download in progress, if any; its activation goes with it."""
+    async def cancel_download(self, key: str) -> None:
+        """Stop the download of `key`, if it is still running; its activation goes with it.
+
+        Raises `SpeechSettingsError`: 404 for an unknown key, 409 while another model downloads.
+        """
+        entry = self._entry(key)
+        running = self._running()
+        if running is not None and running.entry != entry:
+            raise SpeechSettingsError(
+                409, f"{running.entry.label} is downloading, not {entry.label}."
+            )
         await self._stop()
 
     async def uninstall(self, key: str) -> None:
@@ -235,10 +244,11 @@ class SpeechService:
         return self._tts.synthesize(text, voice)
 
     async def status(self) -> SpeechStatus:
-        """Whether the selected models are ready on their servers."""
-        settings = await self._settings()
+        """Whether the models a conversation would use now are ready on their servers: a saved
+        model that is not installed gives way to its default, as in `for_session`."""
+        session = await self.for_session()
         recognition, synthesis = await asyncio.gather(
-            self._stt.status(settings.stt_model), self._tts.status(settings.tts_model)
+            self._stt.status(session.stt_model), self._tts.status(session.voice.model)
         )
         return SpeechStatus(recognition=recognition, synthesis=synthesis)
 
@@ -342,6 +352,10 @@ class SpeechService:
             # The server itself, not `_installed()`: that leaves out the model still downloading.
             if entry.model_id not in await self._servers[entry.kind].installed():
                 self._last_error = _NOT_SEEN_BY_SPEACHES
+                try:  # nothing can use the files, so they would only take space
+                    await files.delete(entry.model_id)
+                except SpeechSettingsError as error:  # the error above says more
+                    logger.warning("Could not remove %s: %s", entry.model_id, error.message)
             elif download.activate:
                 await self._select(entry, download)
         except (SpeechSettingsError, ProviderError) as error:

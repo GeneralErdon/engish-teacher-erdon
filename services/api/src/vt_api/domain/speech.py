@@ -198,7 +198,8 @@ class SpeechSettingsError(Exception):
     """A speech settings request the api refuses, in words the learner can act on.
 
     `status` is the HTTP status the route answers with: 404 (unknown model), 409 (busy),
-    422 (invalid choice), 507 (no disk space) or 502 (the speech server failed).
+    422 (invalid choice), 500 (model files that cannot be removed), 502 (the speech server or
+    Hugging Face failed) or 507 (no disk space).
     """
 
     def __init__(self, status: int, message: str) -> None:

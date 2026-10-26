@@ -196,6 +196,16 @@ async def test_cancelling_a_download_answers_204(client: httpx2.AsyncClient) -> 
     assert {m.key: m.state for m in models.models}["whisper-tiny-en"] == "available"
 
 
+async def test_cancelling_another_model_answers_409(client: httpx2.AsyncClient) -> None:
+    await client.post("/v1/speech/models/whisper-tiny-en/download", json={})
+
+    response = await client.delete("/v1/speech/models/piper-alba/download")
+
+    assert response.status_code == 409
+    models = SpeechModels.model_validate_json((await client.get("/v1/speech/models")).content)
+    assert {m.key: m.state for m in models.models}["whisper-tiny-en"] == "downloading"
+
+
 async def test_the_default_model_cannot_be_uninstalled(client: httpx2.AsyncClient) -> None:
     models = SpeechModels.model_validate_json((await client.get("/v1/speech/models")).content)
     default = next(m for m in models.models if m.default and m.kind == "recognition")

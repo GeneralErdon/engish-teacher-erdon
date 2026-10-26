@@ -106,6 +106,7 @@ class FakeFiles:
         self.partial: set[str] = set()
         """Half-written folders, as an api killed mid-download leaves them."""
         self.error: Exception | None = None
+        self.delete_error: SpeechSettingsError | None = None
         self.task: asyncio.Task[Any] | None = None
         """The task the running download is awaited in: the service's."""
         self._progress: tuple[str, DownloadProgress] | None = None
@@ -137,6 +138,8 @@ class FakeFiles:
 
     async def delete(self, model_id: str) -> None:
         self.calls.append(f"delete {model_id}")
+        if self.delete_error is not None:
+            raise self.delete_error
 
     async def incomplete(self) -> set[str]:
         return set(self.partial)
@@ -419,15 +422,22 @@ async def test_download_with_activate_selects_the_model_when_done(
     assert (row.state, row.selected) == ("installed", True)
 
 
+@pytest.mark.parametrize("delete_error", [None, SpeechSettingsError(500, "Permission denied")])
 async def test_download_seen_by_speaches_is_required(
-    service: SpeechService, files: FakeFiles
+    service: SpeechService,
+    files: FakeFiles,
+    calls: list[str],
+    delete_error: SpeechSettingsError | None,
 ) -> None:
-    """Review Focus 1: the api downloaded into a folder Speaches does not read."""
+    """Review Focus 1: the api downloaded into a folder Speaches does not read. Nothing can use
+    those files, so they go; failing to remove them does not hide why."""
     files.shared = False
+    files.delete_error = delete_error
     await service.download("whisper-small-en", activate=True)
 
     await files.finish()
 
+    assert calls == [f"delete {SMALL}"]
     models = await service.models()
     assert models.last_error == (
         "Downloaded, but Speaches does not see it: VT_SPEECH_MODELS_DIR must be the folder "
@@ -492,7 +502,9 @@ async def test_cancelling_twice_waits_for_the_one_cancel(
     await service.download("whisper-small-en", activate=True)
     task = await files.started()
 
-    await asyncio.gather(service.cancel_download(), service.cancel_download())
+    await asyncio.gather(
+        service.cancel_download("whisper-small-en"), service.cancel_download("whisper-small-en")
+    )
 
     assert task.cancelled()
     assert (await service.view()).pending == []
@@ -604,7 +616,7 @@ async def test_cancel_drops_the_intent(service: SpeechService, files: FakeFiles)
     await service.download("whisper-small-en", activate=True)
     task = await files.started()
 
-    await service.cancel_download()
+    await service.cancel_download("whisper-small-en")
 
     assert task.cancelled()
     view = await service.view()
@@ -612,8 +624,24 @@ async def test_cancel_drops_the_intent(service: SpeechService, files: FakeFiles)
     models = await service.models()
     assert (_row(models, SMALL).state, models.last_error) == ("available", None)
 
-    await service.cancel_download()  # nothing to cancel
+    await service.cancel_download("whisper-small-en")  # nothing to cancel
     await service.download("whisper-tiny-en", activate=False)  # the next one may start
+
+
+async def test_cancelling_another_model_conflicts(service: SpeechService, files: FakeFiles) -> None:
+    """A stale tab cancels a download that has since ended and been replaced by another."""
+    await service.download("whisper-small-en", activate=True)
+    task = await files.started()
+
+    with pytest.raises(SpeechSettingsError) as refused:
+        await service.cancel_download("whisper-tiny-en")
+    assert refused.value.status == 409
+    with pytest.raises(SpeechSettingsError) as refused:
+        await service.cancel_download("whisper-huge")
+    assert refused.value.status == 404
+
+    assert not task.done()
+    assert (await service.view()).pending == [SMALL]
 
 
 @pytest.mark.parametrize("missing", ["files", "speaches"])
@@ -905,7 +933,7 @@ async def test_synthesize_streams_the_tutors_voice(
     tts.synthesize.assert_called_once_with("Hi.", voice)
 
 
-async def test_status_is_of_the_selected_models(
+async def test_status_is_of_the_models_in_use(
     service: SpeechService,
     speech_defaults: SpeechSettings,
     installed: set[str],
@@ -919,12 +947,19 @@ async def test_status_is_of_the_selected_models(
 
     stt.status.side_effect = ready
     tts.status.side_effect = ready
-    installed.add(SMALL)
-    await service.save(speech_defaults.model_copy(update={"stt_model": SMALL}))
+    installed.update({SMALL, ALBA})
+    await service.save(
+        speech_defaults.model_copy(
+            update={"stt_model": SMALL, "tts_model": ALBA, "tts_voice": "alba"}
+        )
+    )
 
     status = await service.status()
+    assert (status.recognition.model, status.synthesis.model) == (SMALL, ALBA)
 
-    assert (status.recognition.model, status.synthesis.model) == (SMALL, KOKORO)
+    installed.discard(SMALL)  # a voice turn falls back to the default: so does the status
+    status = await service.status()
+    assert (status.recognition.model, status.synthesis.model) == (WHISPER, ALBA)
 
 
 async def test_aclose_cancels_a_running_download(service: SpeechService, files: FakeFiles) -> None:

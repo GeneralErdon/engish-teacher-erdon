@@ -1952,7 +1952,7 @@
     },
     "/v1/speech/models/{key}/download": {
       "delete": {
-        "description": "Stops the one download in progress; `key` only names it in the path.",
+        "description": "Stops the download of `key`; nothing to do once it has ended, and 409 while another model\ndownloads.",
         "operationId": "cancel_download_v1_speech_models__key__download_delete",
         "parameters": [
           {
@@ -2137,7 +2137,7 @@
     },
     "/v1/speech/status": {
       "get": {
-        "description": "Whether each speech server answers and has its selected model: speech-to-text for the\nlearner's voice, text-to-speech for the tutor's.",
+        "description": "Whether each speech server answers and has the model a conversation would use: the\nselected one, or the default while the selected one is not installed. Speech-to-text for\nthe learner's voice, text-to-speech for the tutor's.",
         "operationId": "speech_status_v1_speech_status_get",
         "responses": {
           "200": {

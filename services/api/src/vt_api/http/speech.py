@@ -69,9 +69,9 @@ async def download_model(key: str, body: DownloadRequest, speech: Speech) -> Spe
 
 @router.delete("/models/{key}/download", status_code=204)
 async def cancel_download(key: str, speech: Speech) -> None:
-    """Stops the one download in progress; `key` only names it in the path."""
-    del key
-    await speech.cancel_download()
+    """Stops the download of `key`; nothing to do once it has ended, and 409 while another model
+    downloads."""
+    await speech.cancel_download(key)
 
 
 @router.delete("/models/{key}", status_code=204)
@@ -96,6 +96,7 @@ async def preview_voice(body: VoicePreview, speech: Speech) -> Response:
 
 @router.get("/status")
 async def speech_status(speech: Speech) -> SpeechStatus:
-    """Whether each speech server answers and has its selected model: speech-to-text for the
-    learner's voice, text-to-speech for the tutor's."""
+    """Whether each speech server answers and has the model a conversation would use: the
+    selected one, or the default while the selected one is not installed. Speech-to-text for
+    the learner's voice, text-to-speech for the tutor's."""
     return await speech.status()

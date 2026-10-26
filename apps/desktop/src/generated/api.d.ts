@@ -177,7 +177,8 @@ export interface paths {
         post: operations["download_model_v1_speech_models__key__download_post"];
         /**
          * Cancel Download
-         * @description Stops the one download in progress; `key` only names it in the path.
+         * @description Stops the download of `key`; nothing to do once it has ended, and 409 while another model
+         *     downloads.
          */
         delete: operations["cancel_download_v1_speech_models__key__download_delete"];
         options?: never;
@@ -232,8 +233,9 @@ export interface paths {
         };
         /**
          * Speech Status
-         * @description Whether each speech server answers and has its selected model: speech-to-text for the
-         *     learner's voice, text-to-speech for the tutor's.
+         * @description Whether each speech server answers and has the model a conversation would use: the
+         *     selected one, or the default while the selected one is not installed. Speech-to-text for
+         *     the learner's voice, text-to-speech for the tutor's.
          */
         get: operations["speech_status_v1_speech_status_get"];
         put?: never;
