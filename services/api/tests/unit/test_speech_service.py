@@ -5,7 +5,7 @@ import asyncio
 import io
 import itertools
 import wave
-from collections.abc import AsyncIterator, Collection, Iterator
+from collections.abc import AsyncIterator, Callable, Collection, Iterator
 from typing import Any
 from unittest.mock import NonCallableMagicMock, create_autospec
 
@@ -28,6 +28,7 @@ from vt_api.services.speech import PREVIEW_TEXT, SpeechService
 from vt_contracts.speech import (
     DownloadProgress,
     ModelStatus,
+    SpeechEngineState,
     SpeechModel,
     SpeechModels,
     SpeechSettings,
@@ -42,6 +43,20 @@ TINY = "Systran/faster-whisper-tiny.en"
 KOKORO = "speaches-ai/Kokoro-82M-v1.0-ONNX"  # the default
 KOKORO_INT8 = "speaches-ai/Kokoro-82M-v1.0-ONNX-int8"
 ALBA = "speaches-ai/piper-en_GB-alba-medium"
+SMALL_Q8 = "ggerganov/whisper.cpp/ggml-small.en-q8_0.bin"  # the GPU default
+MEDIUM_Q5 = "ggerganov/whisper.cpp/ggml-medium.en-q5_0.bin"
+TURBO_Q5 = "ggerganov/whisper.cpp/ggml-large-v3-turbo-q5_0.bin"
+GPU_KEYS = [
+    "whispercpp-base-en",
+    "whispercpp-small-en-q8",
+    "whispercpp-medium-en-q5",
+    "whispercpp-large-v3-turbo-q5",
+    "whispercpp-large-v3-turbo-q8",
+    "whispercpp-large-v3-turbo",
+]
+GPU_STOPPED = (
+    "whisper.cpp (GPU) is not running: start it with `just voice gpu` (Linux, AMD or Intel GPU)."
+)
 
 HEART = Voice(id="af_heart", name="Heart", accent="american", gender="female")
 EMMA = Voice(id="bf_emma", name="Emma", accent="british", gender="female")
@@ -171,6 +186,31 @@ class FakeFiles:
         return task
 
 
+class FakeGpu:
+    """The whisper.cpp server; `up` is whether it answers."""
+
+    def __init__(self) -> None:
+        self.up = True
+        self.loaded: list[str] = []
+        """The model paths `load` was asked for, in order."""
+        self.text = "Hello from the GPU"
+
+    async def running(self) -> bool:
+        await asyncio.sleep(0)  # an HTTP call: other requests run meanwhile
+        return self.up
+
+    async def load(self, model: str) -> None:
+        self.loaded.append(model)
+
+    async def transcribe(self, wav: bytes, model: str, timeout_s: float) -> str:
+        return self.text
+
+    async def status(self, model: str) -> ModelStatus:
+        return ModelStatus(
+            base_url="http://localhost:8002/v1", model=model, reachable=self.up, model_ready=self.up
+        )
+
+
 class Clock:
     """`time.perf_counter` for the service: the next of `readings`."""
 
@@ -209,6 +249,11 @@ def files(installed: set[str], calls: list[str]) -> FakeFiles:
 
 
 @pytest.fixture
+def gpu() -> FakeGpu:
+    return FakeGpu()
+
+
+@pytest.fixture
 def stt() -> NonCallableMagicMock:
     mock: NonCallableMagicMock = create_autospec(OpenAISpeechToText, instance=True)
     return mock
@@ -226,26 +271,39 @@ def clock() -> Clock:
 
 
 @pytest.fixture
-async def service(
+def build(
     database: Database,
     speech_defaults: SpeechSettings,
     recognition: FakeServer,
     voice_server: FakeServer,
     files: FakeFiles,
+    gpu: FakeGpu,
     stt: NonCallableMagicMock,
     tts: NonCallableMagicMock,
     clock: Clock,
-) -> AsyncIterator[SpeechService]:
-    service = SpeechService(
-        repository=SqlSpeechSettingsRepository(database),
-        stt=stt,
-        tts=tts,
-        recognition_server=recognition,
-        voice_server=voice_server,
-        files=files,
-        defaults=speech_defaults,
-        clock=clock,
-    )
+) -> Callable[..., SpeechService]:
+    """A `SpeechService` over the fakes, with `changes` to its arguments."""
+
+    def build(**changes: Any) -> SpeechService:
+        arguments: dict[str, Any] = {
+            "repository": SqlSpeechSettingsRepository(database),
+            "stt": stt,
+            "tts": tts,
+            "recognition_server": recognition,
+            "voice_server": voice_server,
+            "files": files,
+            "defaults": speech_defaults,
+            "gpu_stt": gpu,
+            "clock": clock,
+        }
+        return SpeechService(**(arguments | changes))
+
+    return build
+
+
+@pytest.fixture
+async def service(build: Callable[..., SpeechService]) -> AsyncIterator[SpeechService]:
+    service = build()
     yield service
     await service.aclose()
 
@@ -388,6 +446,7 @@ async def test_models_merge_catalog_installed_downloading_and_measured(
     assert _row(models, TINY) == SpeechModel(
         key="whisper-tiny-en",
         kind="recognition",
+        engine="openai",
         model_id=TINY,
         label="Whisper tiny (English)",
         hint="Fastest, least accurate",
@@ -403,12 +462,13 @@ async def test_models_merge_catalog_installed_downloading_and_measured(
     assert (_row(models, SMALL).state, _row(models, SMALL).download) == ("installed", None)
     assert _row(models, "Systran/faster-whisper-base.en").state == "available"
     assert _row(models, WHISPER).ms_per_audio_s == 666.7  # 4000 ms / 6 s
-    assert [(m.kind, m.model_id) for m in models.models if m.selected] == [
-        ("recognition", WHISPER),
-        ("voice", KOKORO),
+    assert [(m.kind, m.engine, m.model_id) for m in models.models if m.selected] == [
+        ("recognition", "openai", WHISPER),
+        ("recognition", "whispercpp", SMALL_Q8),
+        ("voice", "openai", KOKORO),
     ]
-    assert [m.model_id for m in models.models if m.default] == [WHISPER, KOKORO]
-    assert len(models.models) == 14
+    assert [m.model_id for m in models.models if m.default] == [WHISPER, SMALL_Q8, KOKORO]
+    assert len(models.models) == 20
     assert not any(m.from_configuration for m in models.models)
     assert (models.recognition_manageable, models.voice_manageable) == (True, True)
     assert models.last_error is None
@@ -697,7 +757,13 @@ async def test_for_session_falls_back_to_default_when_missing(
     installed.update({SMALL, ALBA})
     await service.save(
         SpeechSettings(
-            stt_model=SMALL, tts_model=ALBA, tts_voice="alba", tts_speed=1.1, max_turn_s=180
+            stt_model=SMALL,
+            stt_engine="openai",
+            stt_gpu_model=SMALL_Q8,
+            tts_model=ALBA,
+            tts_voice="alba",
+            tts_speed=1.1,
+            max_turn_s=180,
         )
     )
     assert await service.for_session() == SessionSpeech(
@@ -783,6 +849,7 @@ async def test_models_survive_a_server_that_does_not_answer(
     assert {m.state for m in models.models if m.kind == "recognition"} == {"available"}
     assert (_row(models, WHISPER).default, _row(models, WHISPER).selected) == (True, True)
     assert (models.recognition_manageable, models.voice_manageable) == (False, True)
+    assert models.engines[0] == SpeechEngineState(engine="openai", running=False, manageable=False)
     with pytest.raises(SpeechSettingsError) as refused:
         await service.download("whisper-small-en", activate=True)
     assert refused.value.status == 409
@@ -1018,3 +1085,197 @@ async def test_the_default_longest_turn_is_known_before_any_session(
     speech_defaults: SpeechSettings, service: SpeechService
 ) -> None:
     assert service.default_max_turn_s == speech_defaults.max_turn_s
+
+
+# ---------------------------------------------------------------- engines and GPU models
+
+
+@pytest.mark.parametrize("up", [True, False])
+async def test_models_list_the_gpu_models_and_the_engines(
+    service: SpeechService,
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+    gpu: FakeGpu,
+    up: bool,
+) -> None:
+    installed.update({SMALL_Q8, TURBO_Q5})
+    await service.save(speech_defaults.model_copy(update={"stt_gpu_model": TURBO_Q5}))
+    gpu.up = up
+
+    models = await service.models()
+
+    rows = [m for m in models.models if m.engine == "whispercpp"]
+    assert [m.key for m in rows] == GPU_KEYS
+    assert {m.kind for m in rows} == {"recognition"}
+    assert [m.model_id for m in rows if m.state == "installed"] == [SMALL_Q8, TURBO_Q5]
+    assert [m.model_id for m in rows if m.selected] == [TURBO_Q5]
+    assert [m.model_id for m in rows if m.default] == [SMALL_Q8]
+    assert _row(models, TURBO_Q5) == SpeechModel(
+        key=GPU_KEYS[3],  # whispercpp-large-v3-turbo-q5
+        kind="recognition",
+        engine="whispercpp",
+        model_id=TURBO_Q5,
+        label="Whisper large v3 turbo (5-bit)",
+        hint="The accurate choice (multilingual)",
+        approx_mb=574,
+        english_only=False,
+        state="installed",
+        download=None,
+        default=False,
+        selected=True,
+        from_configuration=False,
+        ms_per_audio_s=None,
+    )
+    assert {m.engine for m in models.models if m.key not in GPU_KEYS} == {"openai"}
+    assert models.engines == [
+        SpeechEngineState(engine="openai", running=True, manageable=True),
+        SpeechEngineState(engine="whispercpp", running=up, manageable=True),
+    ]
+
+
+@pytest.mark.parametrize("missing", ["files", "gpu_stt"])
+async def test_the_gpu_engine_needs_the_models_folder_and_its_server(
+    build: Callable[..., SpeechService], installed: set[str], missing: str
+) -> None:
+    """Without the models folder the api cannot find the GPU files, so nothing on it counts as
+    installed. Either way the engine is not usable (only tests leave the GPU server out)."""
+    installed.add(TURBO_Q5)
+    service = build(**{missing: None})
+
+    models = await service.models()
+
+    assert models.engines[1] == SpeechEngineState(
+        engine="whispercpp", running=False, manageable=False
+    )
+    expected = "available" if missing == "files" else "installed"
+    assert _row(models, TURBO_Q5).state == expected
+
+
+async def test_switching_to_a_stopped_engine_is_refused(
+    service: SpeechService, speech_defaults: SpeechSettings, gpu: FakeGpu
+) -> None:
+    gpu.up = False
+
+    with pytest.raises(SpeechSettingsError) as refused:
+        await service.save(speech_defaults.model_copy(update={"stt_engine": "whispercpp"}))
+
+    assert (refused.value.status, refused.value.message) == (409, GPU_STOPPED)
+    assert (await service.view()).source == "environment"
+
+
+@pytest.mark.parametrize(
+    ("missing", "message"),
+    [
+        (
+            "files",
+            "whisper.cpp (GPU) needs VT_SPEECH_MODELS_DIR, the models folder it shares with the "
+            "api (see docs/configuration.md).",
+        ),
+        ("gpu_stt", GPU_STOPPED),
+    ],
+)
+async def test_switching_to_an_unusable_gpu_engine_is_refused(
+    build: Callable[..., SpeechService],
+    speech_defaults: SpeechSettings,
+    missing: str,
+    message: str,
+) -> None:
+    service = build(**{missing: None})
+
+    with pytest.raises(SpeechSettingsError) as refused:
+        await service.save(speech_defaults.model_copy(update={"stt_engine": "whispercpp"}))
+
+    assert (refused.value.status, refused.value.message) == (409, message)
+
+
+async def test_switching_back_to_a_stopped_speaches_is_refused(
+    service: SpeechService, speech_defaults: SpeechSettings, recognition: FakeServer
+) -> None:
+    gpu_settings = speech_defaults.model_copy(update={"stt_engine": "whispercpp"})
+    await service.save(gpu_settings)
+    recognition.error = UNREACHABLE
+
+    with pytest.raises(SpeechSettingsError) as refused:
+        await service.save(speech_defaults)
+
+    assert (refused.value.status, refused.value.message) == (
+        409,
+        "Speaches is not running: start it with `just voice`.",
+    )
+    assert (await service.view()).stt_engine == "whispercpp"
+
+
+async def test_switching_to_a_running_engine_saves(
+    service: SpeechService, speech_defaults: SpeechSettings
+) -> None:
+    saved = await service.save(speech_defaults.model_copy(update={"stt_engine": "whispercpp"}))
+
+    assert (saved.stt_engine, saved.stt_model, saved.stt_gpu_model, saved.source) == (
+        "whispercpp",
+        WHISPER,
+        SMALL_Q8,
+        "saved",
+    )
+    assert (await service.view()).stt_engine == "whispercpp"
+
+    saved = await service.save(speech_defaults)  # back to Speaches, which answers
+    assert (saved.stt_engine, saved.source) == ("openai", "saved")
+
+
+async def test_a_gpu_model_must_be_installed(
+    service: SpeechService,
+    build: Callable[..., SpeechService],
+    speech_defaults: SpeechSettings,
+    installed: set[str],
+) -> None:
+    installed.add(SMALL)  # on Speaches, but not a whisper.cpp file
+    refusals: list[tuple[int, str]] = []
+
+    for model in (MEDIUM_Q5, SMALL):
+        with pytest.raises(SpeechSettingsError) as refused:
+            await service.save(speech_defaults.model_copy(update={"stt_gpu_model": model}))
+        refusals.append((refused.value.status, refused.value.message))
+
+    assert refusals == [
+        (422, f"{MEDIUM_Q5} is not installed: download it first."),
+        (422, f"{SMALL} is not a speech recognition model for whisper.cpp."),
+    ]
+    installed.add(MEDIUM_Q5)
+    saved = await service.save(speech_defaults.model_copy(update={"stt_gpu_model": MEDIUM_Q5}))
+    assert (saved.stt_gpu_model, saved.stt_model) == (MEDIUM_Q5, WHISPER)
+    # The default is always accepted, as `just voice gpu` downloads it before the server starts.
+    saved = await service.save(speech_defaults)
+    assert saved.stt_gpu_model == SMALL_Q8
+    # Without the models folder, no GPU file can be found.
+    with pytest.raises(SpeechSettingsError) as refused:
+        await build(files=None).save(
+            speech_defaults.model_copy(update={"stt_gpu_model": MEDIUM_Q5})
+        )
+    assert refused.value.status == 422
+
+
+async def test_only_a_changed_engine_is_checked(
+    service: SpeechService, speech_defaults: SpeechSettings, gpu: FakeGpu
+) -> None:
+    """Review Focus 4: the saved engine stopped, and the learner changes something else."""
+    chosen = speech_defaults.model_copy(update={"stt_engine": "whispercpp"})
+    await service.save(chosen)
+    gpu.up = False
+
+    saved = await service.save(chosen.model_copy(update={"tts_speed": 1.2}))
+
+    assert (saved.stt_engine, saved.tts_speed) == ("whispercpp", 1.2)
+    view = await service.view()
+    assert (view.stt_engine, view.stt_model, view.missing) == ("whispercpp", WHISPER, [])
+    assert (await service.models()).engines[1].running is False
+
+
+async def test_choosing_an_installed_gpu_model_keeps_the_speaches_one(
+    service: SpeechService, installed: set[str]
+) -> None:
+    installed.add(MEDIUM_Q5)
+
+    await service.download("whispercpp-medium-en-q5", activate=True)
+
+    view = await service.view()
+    assert (view.stt_gpu_model, view.stt_model) == (MEDIUM_Q5, WHISPER)

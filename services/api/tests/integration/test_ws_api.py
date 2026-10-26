@@ -109,6 +109,8 @@ def client(database: Database, learner_service: LearnerService) -> TestClient:
         files=None,
         defaults=SpeechSettings(
             stt_model="whisper",
+            stt_engine="openai",
+            stt_gpu_model="ggerganov/whisper.cpp/ggml-small.en-q8_0.bin",
             tts_model="kokoro",
             tts_voice="af_heart",
             tts_speed=1.0,

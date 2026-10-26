@@ -1,7 +1,9 @@
-"""The speech choices saved from the UI (defaults from `VT_STT_MODEL`, `VT_TTS_*` and
+"""The speech choices saved from the UI (defaults from `VT_STT_*`, `VT_TTS_*` and
 `VT_MAX_TURN_S`), model downloads, and the choice each conversation uses.
 
-Models are downloaded and uninstalled only where a kind is *manageable*: Speaches, with
+The learner chooses one model on each *track*: speech recognition on Speaches, speech recognition
+on whisper.cpp (GPU), and the voice; `stt_engine` says which recognition engine to use. Models are
+downloaded and uninstalled only where a track is *manageable*: Speaches, with
 `VT_SPEECH_MODELS_DIR` set. Any other OpenAI-compatible server keeps working, with read-only lists.
 """
 
@@ -23,6 +25,7 @@ from vt_api.domain.speech import (
     transcription_timeout_s,
 )
 from vt_api.ports.speech import (
+    GpuSpeechToText,
     ModelFiles,
     SpeechModelServer,
     SpeechSettingsRepository,
@@ -31,12 +34,14 @@ from vt_api.ports.speech import (
 )
 from vt_contracts.audio import OUTPUT_SAMPLE_RATE_HZ
 from vt_contracts.speech import (
+    SpeechEngineState,
     SpeechKind,
     SpeechModel,
     SpeechModels,
     SpeechSettings,
     SpeechSettingsView,
     SpeechStatus,
+    SttEngine,
     Voice,
     VoicePreview,
 )
@@ -48,8 +53,32 @@ _NOT_SEEN_BY_SPEACHES = (
     "Downloaded, but Speaches does not see it: VT_SPEECH_MODELS_DIR must be the folder Speaches "
     "reads (see docs/configuration.md)"
 )
-_KINDS: tuple[SpeechKind, ...] = ("recognition", "voice")
 _NAMES: dict[SpeechKind, str] = {"recognition": "speech recognition", "voice": "voice"}
+
+type _Track = tuple[SpeechKind, SttEngine]
+"""A list of models the learner chooses one from."""
+_SPEACHES: _Track = ("recognition", "openai")
+_GPU: _Track = ("recognition", "whispercpp")
+_VOICE: _Track = ("voice", "openai")
+_TRACKS: tuple[_Track, ...] = (_SPEACHES, _GPU, _VOICE)
+_FIELDS: dict[_Track, str] = {_SPEACHES: "stt_model", _GPU: "stt_gpu_model", _VOICE: "tts_model"}
+"""The setting that holds each track's model: each engine keeps its own choice."""
+_WHAT: dict[_Track, str] = {
+    _SPEACHES: "a speech recognition model",
+    _GPU: "a speech recognition model for whisper.cpp",
+    _VOICE: "a voice model",
+}
+_NOT_RUNNING: dict[SttEngine, str] = {
+    "openai": "Speaches is not running: start it with `just voice`.",
+    "whispercpp": (
+        "whisper.cpp (GPU) is not running: start it with `just voice gpu` (Linux, AMD or Intel "
+        "GPU)."
+    ),
+}
+_GPU_NEEDS_FILES = (
+    "whisper.cpp (GPU) needs VT_SPEECH_MODELS_DIR, the models folder it shares with the api (see "
+    "docs/configuration.md)."
+)
 
 
 @dataclass
@@ -70,6 +99,17 @@ class _Measured:
     ms: float = 0.0
 
 
+@dataclass(frozen=True, slots=True)
+class _TrackModels:
+    """One track's catalog, with each model's state."""
+
+    rows: list[SpeechModel]
+    manageable: bool
+    answered: bool
+    """Its server said what is installed: Speaches is running. Always, on the GPU track, whose
+    files the api reads itself."""
+
+
 class SpeechService:
     def __init__(
         self,
@@ -81,6 +121,7 @@ class SpeechService:
         voice_server: SpeechModelServer,
         files: ModelFiles | None,
         defaults: SpeechSettings,
+        gpu_stt: GpuSpeechToText | None = None,
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self._repository = repository
@@ -91,6 +132,7 @@ class SpeechService:
             "voice": voice_server,
         }
         self._files = files
+        self._gpu_stt = gpu_stt
         self._defaults = defaults
         self._clock = clock
         self._download: _Download | None = None
@@ -114,13 +156,16 @@ class SpeechService:
         """Checks only what changed, so a saved model that went missing, or a server that does
         not answer, never blocks the speed or the turn length.
 
-        Raises `SpeechSettingsError`: 422 for a model that is not installed or a voice the model
-        does not have, 502 when the server cannot tell what is installed."""
+        Raises `SpeechSettingsError`: 409 when switching to an engine that is not running, 422
+        for a model that is not installed or a voice the model does not have, 502 when the
+        server cannot tell what is installed."""
         async with self._settings_lock:
             current = await self._settings()
-            for kind in _KINDS:
-                if _model(settings, kind) != _model(current, kind):
-                    await self._check_installed(kind, _model(settings, kind))
+            for track in _TRACKS:
+                if _model(settings, track) != _model(current, track):
+                    await self._check_installed(track, _model(settings, track))
+            if settings.stt_engine != current.stt_engine:
+                await self._check_engine(settings.stt_engine)
             if (settings.tts_model, settings.tts_voice) != (current.tts_model, current.tts_voice):
                 voices = {voice.id for voice in await self.voices(settings.tts_model)}
                 if voices and settings.tts_voice not in voices:
@@ -133,14 +178,24 @@ class SpeechService:
 
     async def models(self) -> SpeechModels:
         settings = await self._settings()
-        (recognition, recognition_manageable), (voice, voice_manageable) = await asyncio.gather(
-            self._kind_models("recognition", settings.stt_model),
-            self._kind_models("voice", settings.tts_model),
+        speaches, gpu, voice, gpu_running = await asyncio.gather(
+            self._track_models(_SPEACHES, settings.stt_model),
+            self._track_models(_GPU, settings.stt_gpu_model),
+            self._track_models(_VOICE, settings.tts_model),
+            self._gpu_running(),
         )
         return SpeechModels(
-            models=recognition + voice,
-            recognition_manageable=recognition_manageable,
-            voice_manageable=voice_manageable,
+            models=speaches.rows + gpu.rows + voice.rows,
+            recognition_manageable=speaches.manageable,
+            voice_manageable=voice.manageable,
+            engines=[
+                SpeechEngineState(
+                    engine="openai", running=speaches.answered, manageable=speaches.manageable
+                ),
+                SpeechEngineState(
+                    engine="whispercpp", running=gpu_running, manageable=self._gpu() is not None
+                ),
+            ],
             last_error=self._last_error,
         )
 
@@ -153,7 +208,7 @@ class SpeechService:
         """
         entry = self._entry(key)
         installed = await self._is_installed(entry)
-        files = await self._files_for(entry.kind)
+        files = await self._files_for(_track_of(entry))
         # No await from this check until the task exists, so two requests never both start one.
         running = self._running()
         if running is not None and running.entry == entry:
@@ -192,16 +247,17 @@ class SpeechService:
         or the downloading model, or one that cannot be managed here; 500 when its files cannot be
         removed."""
         entry = self._entry(key)
-        if entry.model_id == self._default(entry.kind):
+        track = _track_of(entry)
+        if entry.model_id == self._default(track):
             raise SpeechSettingsError(409, f"{entry.label} is the default and stays installed.")
-        if entry.model_id == _model(await self._settings(), entry.kind):
+        if entry.model_id == _model(await self._settings(), track):
             raise SpeechSettingsError(409, f"{entry.label} is in use: choose another model first.")
         running = self._running()
         if running is not None and running.entry == entry:
             raise SpeechSettingsError(
                 409, f"{entry.label} is downloading: cancel the download first."
             )
-        files = await self._files_for(entry.kind)
+        files = await self._files_for(track)
         if files is None:
             raise _unmanageable(entry.kind)
         try:
@@ -271,9 +327,11 @@ class SpeechService:
         )
 
     async def _session(self, settings: SpeechSettings) -> SessionSpeech:
-        """A saved model that is no longer installed gives way to its kind's default."""
+        """A saved model that is no longer installed gives way to its track's default.
+        Conversations transcribe on Speaches."""
+        tracks = (_SPEACHES, _VOICE)
         used = await asyncio.gather(
-            *(self._installed_or_default(kind, _model(settings, kind)) for kind in _KINDS)
+            *(self._installed_or_default(track, _model(settings, track)) for track in tracks)
         )
         stt_model, tts_model = used
         voice = settings.tts_voice if tts_model == settings.tts_model else self._defaults.tts_voice
@@ -282,30 +340,32 @@ class SpeechService:
             voice=_voice_choice(tts_model, voice, settings.tts_speed),
             max_turn_s=settings.max_turn_s,
             missing=tuple(
-                kind
-                for kind, model in zip(_KINDS, used, strict=True)
-                if model != _model(settings, kind)
+                track[0]
+                for track, model in zip(tracks, used, strict=True)
+                if model != _model(settings, track)
             ),
         )
 
-    async def _installed_or_default(self, kind: SpeechKind, model_id: str) -> str:
+    async def _installed_or_default(self, track: _Track, model_id: str) -> str:
         """`model_id`, unless the server says it is not installed (when it does not answer, a
         voice turn reports that itself)."""
-        if model_id == self._default(kind):
+        if model_id == self._default(track):
             return model_id
         try:
-            installed = await self._installed(kind)
+            installed = await self._installed(track)
         except ProviderError:
             return model_id
-        return model_id if model_id in installed else self._default(kind)
+        return model_id if model_id in installed else self._default(track)
 
-    async def _check_installed(self, kind: SpeechKind, model_id: str) -> None:
-        if model_id == self._default(kind):  # always installed: Speaches preloads it
+    async def _check_installed(self, track: _Track, model_id: str) -> None:
+        # Always installed: Speaches preloads its defaults, and `just voice gpu` downloads the
+        # GPU default before the server starts.
+        if model_id == self._default(track):
             return
-        if all(entry.model_id != model_id for entry in self._catalog(kind)):
-            raise SpeechSettingsError(422, f"{model_id} is not a {_NAMES[kind]} model.")
+        if all(entry.model_id != model_id for entry in self._catalog(track)):
+            raise SpeechSettingsError(422, f"{model_id} is not {_WHAT[track]}.")
         try:
-            installed = await self._installed(kind)
+            installed = await self._installed(track)
         except ProviderError as error:
             raise SpeechSettingsError(
                 502, f"Could not check that {model_id} is installed: {error.message}"
@@ -313,13 +373,40 @@ class SpeechService:
         if model_id not in installed:
             raise SpeechSettingsError(422, f"{model_id} is not installed: download it first.")
 
+    async def _check_engine(self, engine: SttEngine) -> None:
+        """Raises `SpeechSettingsError` (409) when `engine` cannot transcribe now, with how to
+        start it."""
+        if engine == "whispercpp" and self._files is None:
+            raise SpeechSettingsError(409, _GPU_NEEDS_FILES)
+        if not await self._engine_running(engine):
+            raise SpeechSettingsError(409, _NOT_RUNNING[engine])
+
+    async def _engine_running(self, engine: SttEngine) -> bool:
+        """Whether the engine's server answers: Speaches lists its models, and whisper.cpp
+        answers its health check."""
+        if engine == "whispercpp":
+            return await self._gpu_running()
+        try:
+            await self._servers["recognition"].installed()
+        except ProviderError:
+            return False
+        return True
+
+    def _gpu(self) -> GpuSpeechToText | None:
+        """The GPU engine when it is usable: it needs the models folder to find its files."""
+        return self._gpu_stt if self._files is not None else None
+
+    async def _gpu_running(self) -> bool:
+        gpu = self._gpu()
+        return gpu is not None and await gpu.running()
+
     async def _store(self, chosen: SpeechSettings, current: SpeechSettings) -> None:
-        """Save `chosen`, under `_settings_lock`. Changing a kind's model drops the activation of
-        that kind's download: the latest choice wins."""
+        """Save `chosen`, under `_settings_lock`. Changing a track's model drops the activation
+        of that track's download: the latest choice wins."""
         running = self._running()
         if running is not None:
-            kind = running.entry.kind
-            if _model(chosen, kind) != _model(current, kind):
+            track = _track_of(running.entry)
+            if _model(chosen, track) != _model(current, track):
                 running.activate = False
         await self._repository.save(chosen)
 
@@ -333,15 +420,10 @@ class SpeechService:
             if download is not None and not download.activate:
                 return
             current = await self._settings()
-            if entry.kind == "recognition":
-                chosen = current.model_copy(update={"stt_model": entry.model_id})
-            else:
-                keep = not voices or current.tts_voice in voices
-                voice = current.tts_voice if keep else voices[0]
-                chosen = current.model_copy(
-                    update={"tts_model": entry.model_id, "tts_voice": voice}
-                )
-            await self._store(chosen, current)
+            update = {_FIELDS[_track_of(entry)]: entry.model_id}
+            if voices and current.tts_voice not in voices:
+                update["tts_voice"] = voices[0]
+            await self._store(current.model_copy(update=update), current)
 
     async def _run(self, download: _Download, files: ModelFiles) -> None:
         """The background download. A failure ends up in `last_error`, never as an unretrieved
@@ -377,17 +459,17 @@ class SpeechService:
         download = self._download
         return download if download is not None and not download.task.done() else None
 
-    async def _kind_models(self, kind: SpeechKind, selected: str) -> tuple[list[SpeechModel], bool]:
-        """The kind's catalog with each model's state, and whether its models can be managed.
-        A server that does not answer has nothing installed and cannot be managed."""
+    async def _track_models(self, track: _Track, selected: str) -> _TrackModels:
+        """The track's catalog with each model's state. A server that does not answer has
+        nothing installed and cannot be managed."""
         try:
-            installed = await self._installed(kind)
+            installed = await self._installed(track)
         except ProviderError:
-            installed, manageable = set(), False
+            installed, manageable, answered = set(), False, False
         else:
-            manageable = await self._files_for(kind) is not None
-        rows = [self._model_row(entry, installed, selected) for entry in self._catalog(kind)]
-        return rows, manageable
+            manageable, answered = await self._files_for(track) is not None, True
+        rows = [self._model_row(entry, installed, selected) for entry in self._catalog(track)]
+        return _TrackModels(rows, manageable, answered)
 
     def _model_row(self, entry: CatalogEntry, installed: set[str], selected: str) -> SpeechModel:
         """`download` stays `None` until the files report bytes, and once they are complete."""
@@ -398,6 +480,7 @@ class SpeechService:
         return SpeechModel(
             key=entry.key,
             kind=entry.kind,
+            engine=entry.engine,
             model_id=entry.model_id,
             label=entry.label,
             hint=entry.hint,
@@ -411,7 +494,7 @@ class SpeechService:
                 else "available"
             ),
             download=progress[1] if progress is not None else None,
-            default=entry.model_id == self._default(entry.kind),
+            default=entry.model_id == self._default(_track_of(entry)),
             selected=entry.model_id == selected,
             from_configuration=entry_for(entry.model_id) is None,
             ms_per_audio_s=(
@@ -421,13 +504,21 @@ class SpeechService:
             ),
         )
 
-    async def _installed(self, kind: SpeechKind) -> set[str]:
-        """The server's installed models, less those whose files are half-written: one still
-        downloading, or one an api killed mid-download left (the server may list their folders).
-        Raises `ProviderError`."""
-        installed = await self._servers[kind].installed()
-        if self._files is not None:
-            installed -= await self._files.incomplete()
+    async def _installed(self, track: _Track) -> set[str]:
+        """The track's installed models, less the one still downloading.
+
+        On Speaches, the models the server lists, less those an api killed mid-download left
+        half-written (the server may list their folders). Raises `ProviderError`. On the GPU,
+        the catalog's files that are complete in the models folder, and none without it.
+        """
+        kind, engine = track
+        if engine == "whispercpp":
+            ids = [entry.model_id for entry in self._catalog(track)]
+            installed = await self._files.present(ids) if self._files is not None else set()
+        else:
+            installed = await self._servers[kind].installed()
+            if self._files is not None:
+                installed -= await self._files.incomplete()
         running = self._running()
         if running is not None:
             installed.discard(running.entry.model_id)
@@ -435,32 +526,43 @@ class SpeechService:
 
     async def _is_installed(self, entry: CatalogEntry) -> bool:
         try:
-            return entry.model_id in await self._installed(entry.kind)
+            return entry.model_id in await self._installed(_track_of(entry))
         except ProviderError:
             return False
 
-    async def _files_for(self, kind: SpeechKind) -> ModelFiles | None:
-        """The model files when the kind is manageable: Speaches, with `VT_SPEECH_MODELS_DIR`."""
-        if self._files is not None and await self._servers[kind].is_speaches():
+    async def _files_for(self, track: _Track) -> ModelFiles | None:
+        """The model files when the track is manageable: Speaches, with `VT_SPEECH_MODELS_DIR`."""
+        kind, engine = track
+        if (
+            engine == "openai"
+            and self._files is not None
+            and await self._servers[kind].is_speaches()
+        ):
             return self._files
         return None
 
     def _entry(self, key: str) -> CatalogEntry:
         """The catalog entry for `key`, the configured defaults included. Raises 404."""
-        found = next((e for kind in _KINDS for e in self._catalog(kind) if e.key == key), None)
+        found = next((e for track in _TRACKS for e in self._catalog(track) if e.key == key), None)
         if found is None:
             raise SpeechSettingsError(404, f"There is no speech model {key!r}.")
         return found
 
-    def _catalog(self, kind: SpeechKind) -> list[CatalogEntry]:
-        return catalog(kind, self._default(kind))
+    def _catalog(self, track: _Track) -> list[CatalogEntry]:
+        kind, engine = track
+        return catalog(kind, self._default(track), engine)
 
-    def _default(self, kind: SpeechKind) -> str:
-        return _model(self._defaults, kind)
+    def _default(self, track: _Track) -> str:
+        return _model(self._defaults, track)
 
 
-def _model(settings: SpeechSettings, kind: SpeechKind) -> str:
-    return settings.stt_model if kind == "recognition" else settings.tts_model
+def _track_of(entry: CatalogEntry) -> _Track:
+    return entry.kind, entry.engine
+
+
+def _model(settings: SpeechSettings, track: _Track) -> str:
+    model: str = getattr(settings, _FIELDS[track])
+    return model
 
 
 def _unmanageable(kind: SpeechKind) -> SpeechSettingsError:

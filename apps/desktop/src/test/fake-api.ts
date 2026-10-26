@@ -67,12 +67,14 @@ export const ENVIRONMENT: Settings = {
 }
 
 const STT_DEFAULT = 'Systran/faster-distil-whisper-small.en'
+const STT_GPU_DEFAULT = 'ggerganov/whisper.cpp/ggml-small.en-q8_0.bin'
 const TTS_DEFAULT = 'speaches-ai/Kokoro-82M-v1.0-ONNX'
 
 const entry = (
   fields: Pick<Schemas['SpeechModel'], 'key' | 'kind' | 'model_id' | 'label' | 'approx_mb'> &
     Partial<Schemas['SpeechModel']>,
 ): Schemas['SpeechModel'] => ({
+  engine: 'openai',
   hint: 'A good balance.',
   english_only: true,
   state: 'available',
@@ -88,6 +90,10 @@ const entry = (
 export const SPEECH_MODELS: Schemas['SpeechModels'] = {
   recognition_manageable: true,
   voice_manageable: true,
+  engines: [
+    { engine: 'openai', running: true, manageable: true },
+    { engine: 'whispercpp', running: false, manageable: true },
+  ],
   last_error: null,
   models: [
     entry({
@@ -187,6 +193,8 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
     settings: structuredClone(ENVIRONMENT),
     speechSettings: {
       stt_model: STT_DEFAULT,
+      stt_engine: 'openai',
+      stt_gpu_model: STT_GPU_DEFAULT,
       tts_model: TTS_DEFAULT,
       tts_voice: 'af_heart',
       tts_speed: 0.95,

@@ -5,6 +5,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 type SpeechKind = Literal["recognition", "voice"]
+# Speech recognition engines: Speaches (CPU, or an NVIDIA GPU) and whisper.cpp (a Vulkan GPU).
+type SttEngine = Literal["openai", "whispercpp"]
 type ModelState = Literal["installed", "downloading", "available"]
 
 
@@ -38,7 +40,12 @@ class SpeechSettings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     stt_model: str
-    """Hugging Face id, e.g. `Systran/faster-distil-whisper-small.en`."""
+    """The Speaches model: a Hugging Face id, e.g. `Systran/faster-distil-whisper-small.en`."""
+    stt_engine: SttEngine
+    """The engine that transcribes the learner."""
+    stt_gpu_model: str
+    """The whisper.cpp model: a file of a Hugging Face repository, e.g.
+    `ggerganov/whisper.cpp/ggml-small.en-q8_0.bin`. Each engine keeps its own choice."""
     tts_model: str
     tts_voice: str
     tts_speed: float = Field(ge=0.7, le=1.3)
@@ -67,6 +74,8 @@ class SpeechModel(BaseModel):
     key: str
     """Catalog slug, used in URLs."""
     kind: SpeechKind
+    engine: SttEngine
+    """The engine that runs it; voice models are all `openai` (Speaches)."""
     model_id: str
     label: str
     hint: str
@@ -82,6 +91,16 @@ class SpeechModel(BaseModel):
     """Measured transcription speed (recognition only)."""
 
 
+class SpeechEngineState(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    engine: SttEngine
+    running: bool
+    """Its server answers: the engine can be chosen."""
+    manageable: bool
+    """Its models can be downloaded and uninstalled from here."""
+
+
 class SpeechModels(BaseModel):
     """`GET /v1/speech/models`."""
 
@@ -89,7 +108,10 @@ class SpeechModels(BaseModel):
 
     models: list[SpeechModel]
     recognition_manageable: bool
+    """Speaches' speech recognition models can be downloaded and uninstalled from here."""
     voice_manageable: bool
+    engines: list[SpeechEngineState]
+    """The speech recognition engines: `openai`, then `whispercpp`."""
     last_error: str | None
     """The last failed download, until the next one starts."""
 

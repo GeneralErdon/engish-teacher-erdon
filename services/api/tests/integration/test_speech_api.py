@@ -34,6 +34,7 @@ WHISPER = "Systran/faster-distil-whisper-small.en"
 SMALL = "Systran/faster-whisper-small.en"
 KOKORO = "speaches-ai/Kokoro-82M-v1.0-ONNX"
 KOKORO_INT8 = "speaches-ai/Kokoro-82M-v1.0-ONNX-int8"
+SMALL_Q8 = "ggerganov/whisper.cpp/ggml-small.en-q8_0.bin"
 HEART = Voice(id="af_heart", name="Heart", accent="american", gender="female")
 EMMA = Voice(id="bf_emma", name="Emma", accent="british", gender="female")
 
@@ -56,7 +57,11 @@ class FakeServer:
 
 
 class FakeFiles:
-    """A download that runs until the test cancels it."""
+    """A download that runs until the test cancels it. `models` is the folder, shared with the
+    servers."""
+
+    def __init__(self, models: set[str]) -> None:
+        self.models = models
 
     def progress(self) -> tuple[str, DownloadProgress] | None:
         return None
@@ -74,12 +79,28 @@ class FakeFiles:
         return set()
 
     async def present(self, model_ids: Collection[str]) -> set[str]:
-        return set()
+        return {model_id for model_id in model_ids if model_id in self.models}
 
     async def snapshot_path(self, model_id: str) -> str | None:
-        return None
+        return f"snapshots/{model_id}" if model_id in self.models else None
 
     def cleanup(self) -> None:
+        raise NotImplementedError
+
+
+class FakeGpu:
+    """The whisper.cpp server, stopped."""
+
+    async def running(self) -> bool:
+        return False
+
+    async def load(self, model: str) -> None:
+        raise NotImplementedError
+
+    async def transcribe(self, wav: bytes, model: str, timeout_s: float) -> str:
+        raise NotImplementedError
+
+    async def status(self, model: str) -> ModelStatus:
         raise NotImplementedError
 
 
@@ -97,7 +118,7 @@ def _status(model: str) -> ModelStatus:
 async def client(
     database: Database, learner_service: LearnerService, speech_defaults: SpeechSettings
 ) -> AsyncIterator[httpx2.AsyncClient]:
-    installed = {WHISPER, SMALL, KOKORO, KOKORO_INT8}
+    installed = {WHISPER, SMALL, KOKORO, KOKORO_INT8, SMALL_Q8}
     stt: NonCallableMagicMock = create_autospec(OpenAISpeechToText, instance=True)
     stt.status.side_effect = lambda model: _status(model)
     tts: NonCallableMagicMock = create_autospec(OpenAITextToSpeech, instance=True)
@@ -109,8 +130,9 @@ async def client(
         tts=tts,
         recognition_server=FakeServer(installed),
         voice_server=FakeServer(installed),
-        files=FakeFiles(),
+        files=FakeFiles(installed),
         defaults=speech_defaults,
+        gpu_stt=FakeGpu(),
     )
     container = Container(
         llm=create_autospec(LlmService, instance=True),
@@ -255,6 +277,32 @@ async def test_the_status_reports_the_selected_models(
 
     assert status["recognition"]["model"] == SMALL
     assert status["synthesis"]["model"] == KOKORO
+
+
+async def test_the_models_list_the_engines_and_the_gpu_models(client: httpx2.AsyncClient) -> None:
+    models = SpeechModels.model_validate_json((await client.get("/v1/speech/models")).content)
+
+    assert [(e.engine, e.running, e.manageable) for e in models.engines] == [
+        ("openai", True, True),
+        ("whispercpp", False, True),
+    ]
+    gpu = {m.key: m.state for m in models.models if m.engine == "whispercpp"}
+    assert len(gpu) == 6
+    assert gpu["whispercpp-small-en-q8"] == "installed"
+    assert gpu["whispercpp-base-en"] == "available"
+
+
+async def test_switching_to_a_stopped_engine_is_a_409(
+    client: httpx2.AsyncClient, speech_defaults: SpeechSettings
+) -> None:
+    body = _settings(speech_defaults, stt_engine="whispercpp")
+
+    response = await client.put("/v1/speech/settings", json=body)
+
+    assert response.status_code == 409
+    assert "just voice gpu" in response.json()["detail"]
+    view = SpeechSettingsView.model_validate_json((await client.get("/v1/speech/settings")).content)
+    assert (view.stt_engine, view.source) == ("openai", "environment")
 
 
 def test_the_preview_is_declared_as_binary_in_openapi() -> None:

@@ -70,13 +70,18 @@ class LearnerProfileRow(Base):
 
 
 class SpeechSettingsRow(Base):
-    """Speech models, voice, speed and turn length. A single row."""
+    """Speech engine, models, voice, speed and turn length. A single row."""
 
     __tablename__ = "speech_settings"
     __table_args__ = (CheckConstraint("id = 1", name="single_row"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     stt_model: Mapped[str] = mapped_column(String(200))
+    # A row saved before the engine choice reads back as Speaches, with the default GPU model.
+    stt_engine: Mapped[str] = mapped_column(String(20), server_default="openai")
+    stt_gpu_model: Mapped[str] = mapped_column(
+        String(200), server_default="ggerganov/whisper.cpp/ggml-small.en-q8_0.bin"
+    )
     tts_model: Mapped[str] = mapped_column(String(200))
     tts_voice: Mapped[str] = mapped_column(String(100))
     tts_speed: Mapped[float] = mapped_column(Float)

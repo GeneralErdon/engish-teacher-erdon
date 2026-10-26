@@ -1113,6 +1113,29 @@
         "title": "SessionUpdate",
         "type": "object"
       },
+      "SpeechEngineState": {
+        "additionalProperties": false,
+        "properties": {
+          "engine": {
+            "$ref": "#/components/schemas/SttEngine"
+          },
+          "manageable": {
+            "title": "Manageable",
+            "type": "boolean"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "engine",
+          "running",
+          "manageable"
+        ],
+        "title": "SpeechEngineState",
+        "type": "object"
+      },
       "SpeechKind": {
         "enum": [
           "recognition",
@@ -1140,6 +1163,9 @@
                 "type": "null"
               }
             ]
+          },
+          "engine": {
+            "$ref": "#/components/schemas/SttEngine"
           },
           "english_only": {
             "title": "English Only",
@@ -1190,6 +1216,7 @@
         "required": [
           "key",
           "kind",
+          "engine",
           "model_id",
           "label",
           "hint",
@@ -1209,6 +1236,13 @@
         "additionalProperties": false,
         "description": "`GET /v1/speech/models`.",
         "properties": {
+          "engines": {
+            "items": {
+              "$ref": "#/components/schemas/SpeechEngineState"
+            },
+            "title": "Engines",
+            "type": "array"
+          },
           "last_error": {
             "anyOf": [
               {
@@ -1240,6 +1274,7 @@
           "models",
           "recognition_manageable",
           "voice_manageable",
+          "engines",
           "last_error"
         ],
         "title": "SpeechModels",
@@ -1254,6 +1289,13 @@
             "minimum": 30.0,
             "title": "Max Turn S",
             "type": "integer"
+          },
+          "stt_engine": {
+            "$ref": "#/components/schemas/SttEngine"
+          },
+          "stt_gpu_model": {
+            "title": "Stt Gpu Model",
+            "type": "string"
           },
           "stt_model": {
             "title": "Stt Model",
@@ -1276,6 +1318,8 @@
         },
         "required": [
           "stt_model",
+          "stt_engine",
+          "stt_gpu_model",
           "tts_model",
           "tts_voice",
           "tts_speed",
@@ -1317,6 +1361,13 @@
             "title": "Source",
             "type": "string"
           },
+          "stt_engine": {
+            "$ref": "#/components/schemas/SttEngine"
+          },
+          "stt_gpu_model": {
+            "title": "Stt Gpu Model",
+            "type": "string"
+          },
           "stt_model": {
             "title": "Stt Model",
             "type": "string"
@@ -1338,6 +1389,8 @@
         },
         "required": [
           "stt_model",
+          "stt_engine",
+          "stt_gpu_model",
           "tts_model",
           "tts_voice",
           "tts_speed",
@@ -1363,6 +1416,13 @@
         ],
         "title": "SpeechStatus",
         "type": "object"
+      },
+      "SttEngine": {
+        "enum": [
+          "openai",
+          "whispercpp"
+        ],
+        "type": "string"
       },
       "TranscriptFinal": {
         "additionalProperties": false,

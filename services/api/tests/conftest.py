@@ -8,6 +8,7 @@ import pytest
 from vt_api.adapters.secret_key import MasterKey
 from vt_api.adapters.sql.database import Database, open_database
 from vt_api.adapters.sql.learner_profile import SqlLearnerProfileRepository
+from vt_api.domain.speech import DEFAULT_GPU_MODEL
 from vt_api.services.learner import LearnerService
 from vt_contracts.learner import LearnerProfile
 from vt_contracts.speech import SpeechSettings
@@ -49,10 +50,12 @@ def learner_service(database: Database) -> LearnerService:
 
 @pytest.fixture
 def speech_defaults() -> SpeechSettings:
-    """The speech settings when nothing is saved: the defaults of `VT_STT_MODEL`, `VT_TTS_*` and
-    `VT_MAX_TURN_S`."""
+    """The speech settings when nothing is saved: the defaults of `VT_STT_MODEL`,
+    `VT_STT_BACKEND`, `VT_STT_GPU_MODEL`, `VT_TTS_*` and `VT_MAX_TURN_S`."""
     return SpeechSettings(
         stt_model="Systran/faster-distil-whisper-small.en",
+        stt_engine="openai",
+        stt_gpu_model=DEFAULT_GPU_MODEL,
         tts_model="speaches-ai/Kokoro-82M-v1.0-ONNX",
         tts_voice="af_heart",
         tts_speed=0.95,

@@ -93,7 +93,13 @@ SPEECH = SessionSpeech(
     stt_model="whisper", voice=VoiceChoice("kokoro", "af_heart", 0.95), max_turn_s=120
 )
 DEFAULTS = SpeechSettings(
-    stt_model="whisper", tts_model="kokoro", tts_voice="af_heart", tts_speed=0.95, max_turn_s=120
+    stt_model="whisper",
+    stt_engine="openai",
+    stt_gpu_model="ggerganov/whisper.cpp/ggml-small.en-q8_0.bin",
+    tts_model="kokoro",
+    tts_voice="af_heart",
+    tts_speed=0.95,
+    max_turn_s=120,
 )
 
 

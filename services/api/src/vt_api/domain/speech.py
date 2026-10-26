@@ -7,11 +7,15 @@ ties them to the saved settings.
 from dataclasses import dataclass
 
 from vt_api.domain.llm import ProviderError
-from vt_contracts.speech import SpeechKind
+from vt_contracts.speech import SpeechKind, SttEngine
 
 # Piper makes 22.05 kHz audio. Speaches resamples when asked, so every voice streams at the
 # rate the UI player expects.
 PIPER_SAMPLE_RATE_HZ = 24_000
+_GGML_REPO = "ggerganov/whisper.cpp"
+DEFAULT_GPU_MODEL = f"{_GGML_REPO}/ggml-small.en-q8_0.bin"
+"""The whisper.cpp model until another is chosen (`VT_STT_GPU_MODEL`): `just voice gpu`
+downloads it before the server starts."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +29,8 @@ class CatalogEntry:
     english_only: bool
     sample_rate_hz: int | None = None
     """The output rate to request. Set only for Piper."""
+    engine: SttEngine = "openai"
+    """The engine that runs it: whisper.cpp models are single GGML files."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +62,21 @@ def _recognition(
 
 def _piper(key: str, model_id: str, label: str, hint: str) -> CatalogEntry:
     return CatalogEntry(key, "voice", model_id, label, hint, 63, True, PIPER_SAMPLE_RATE_HZ)
+
+
+def _ggml(
+    key: str, file: str, label: str, hint: str, approx_mb: int, *, english_only: bool = True
+) -> CatalogEntry:
+    return CatalogEntry(
+        key,
+        "recognition",
+        f"{_GGML_REPO}/{file}",
+        label,
+        hint,
+        approx_mb,
+        english_only,
+        engine="whispercpp",
+    )
 
 
 CATALOG: tuple[CatalogEntry, ...] = (
@@ -159,12 +180,60 @@ CATALOG: tuple[CatalogEntry, ...] = (
         "Piper Alan (British, male)",
         "Very light and fast, more robotic; one British male voice",
     ),
+    _ggml(
+        "whispercpp-base-en",
+        "ggml-base.en.bin",
+        "Whisper base (English)",
+        "Fastest, least accurate",
+        148,
+    ),
+    _ggml(
+        "whispercpp-small-en-q8",
+        "ggml-small.en-q8_0.bin",
+        "Whisper small (English, 8-bit)",
+        "Fast and accurate on a GPU",
+        264,
+    ),
+    _ggml(
+        "whispercpp-medium-en-q5",
+        "ggml-medium.en-q5_0.bin",
+        "Whisper medium (English, 5-bit)",
+        "More accurate",
+        539,
+    ),
+    _ggml(
+        "whispercpp-large-v3-turbo-q5",
+        "ggml-large-v3-turbo-q5_0.bin",
+        "Whisper large v3 turbo (5-bit)",
+        "The accurate choice (multilingual)",
+        574,
+        english_only=False,
+    ),
+    _ggml(
+        "whispercpp-large-v3-turbo-q8",
+        "ggml-large-v3-turbo-q8_0.bin",
+        "Whisper large v3 turbo (8-bit)",
+        "Most accurate; more GPU memory (multilingual)",
+        874,
+        english_only=False,
+    ),
+    _ggml(
+        "whispercpp-large-v3-turbo",
+        "ggml-large-v3-turbo.bin",
+        "Whisper large v3 turbo (full)",
+        "Full precision; the most GPU memory (multilingual)",
+        1625,
+        english_only=False,
+    ),
 )
 
 
-def catalog(kind: SpeechKind, default_model_id: str) -> list[CatalogEntry]:
-    """The curated models of one kind, plus the configured default when it is not among them."""
-    entries = [e for e in CATALOG if e.kind == kind]
+def catalog(
+    kind: SpeechKind, default_model_id: str, engine: SttEngine = "openai"
+) -> list[CatalogEntry]:
+    """The curated models of one kind on one engine, plus the configured default when it is
+    not among them."""
+    entries = [e for e in CATALOG if e.kind == kind and e.engine == engine]
     if any(e.model_id == default_model_id for e in entries):
         return entries
     slug = default_model_id.rsplit("/", 1)[-1].lower().replace(".", "-").replace("_", "-")
@@ -177,9 +246,17 @@ def catalog(kind: SpeechKind, default_model_id: str) -> list[CatalogEntry]:
             hint="Set in the configuration",
             approx_mb=0,
             english_only=False,
+            engine=engine,
         )
     )
     return entries
+
+
+def single_file_repos(gpu_default: str) -> frozenset[str]:
+    """The repositories whose models are single files, not whole repositories: those of the
+    whisper.cpp catalog and of the configured GPU default (`org/name/file`)."""
+    model_ids = [e.model_id for e in CATALOG if e.engine == "whispercpp"] + [gpu_default]
+    return frozenset(split_model_id(model_id)[0] for model_id in model_ids)
 
 
 def entry(key: str) -> CatalogEntry | None:

@@ -50,6 +50,8 @@ export function VoiceSettings() {
     const cached = queryClient.getQueryData<View>(speechSettingsQuery.queryKey) ?? view
     return {
       stt_model: cached.stt_model,
+      stt_engine: cached.stt_engine,
+      stt_gpu_model: cached.stt_gpu_model,
       tts_model: cached.tts_model,
       tts_voice: cached.tts_voice,
       tts_speed: cached.tts_speed,

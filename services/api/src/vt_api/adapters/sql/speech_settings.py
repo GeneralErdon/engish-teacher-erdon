@@ -33,6 +33,8 @@ class SqlSpeechSettingsRepository:
             return SpeechSettings.model_validate(
                 {
                     "stt_model": row.stt_model,
+                    "stt_engine": row.stt_engine,
+                    "stt_gpu_model": row.stt_gpu_model,
                     "tts_model": row.tts_model,
                     "tts_voice": row.tts_voice,
                     "tts_speed": row.tts_speed,
