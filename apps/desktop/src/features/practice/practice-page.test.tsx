@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { FakeSocket, installFakeSocket } from '@/test/fake-socket'
@@ -219,6 +219,63 @@ describe('Practice', () => {
     expect(await screen.findByPlaceholderText('Connecting…')).toBeDisabled()
   })
 
+  it('gives up when the tutor has not started the conversation within 30 s', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const { user } = renderApp('/practice')
+      await screen.findByRole('heading', { name: 'Practice' })
+      const socket = FakeSocket.last
+      socket.open()
+
+      // The clock also runs on its own (`shouldAdvanceTime`): leave it a margin.
+      await act(() => vi.advanceTimersByTimeAsync(25_000))
+      expect(screen.queryByText('The tutor did not answer')).not.toBeInTheDocument()
+      await act(() => vi.advanceTimersByTimeAsync(5_000))
+
+      expect(screen.getByText('The tutor did not answer')).toBeInTheDocument()
+      expect(socket.closed).toBe(true)
+      expect(screen.getByPlaceholderText('Not connected')).toBeDisabled()
+
+      await user.click(screen.getByRole('button', { name: /reconnect/i }))
+      FakeSocket.last.open()
+      FakeSocket.last.emit(READY)
+      expect(FakeSocket.instances).toHaveLength(2)
+      expect(screen.queryByText('The tutor did not answer')).not.toBeInTheDocument()
+      expect(screen.getByLabelText('Message')).toBeEnabled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('gives up too when the socket never opens', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      renderApp('/practice')
+      await screen.findByRole('heading', { name: 'Practice' })
+
+      await act(() => vi.advanceTimersByTimeAsync(30_000))
+
+      expect(screen.getByText('The tutor did not answer')).toBeInTheDocument()
+      expect(FakeSocket.last.closed).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops counting once the conversation has started', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const { socket } = await openPractice()
+
+      await act(() => vi.advanceTimersByTimeAsync(60_000))
+
+      expect(screen.queryByText('The tutor did not answer')).not.toBeInTheDocument()
+      expect(socket.closed).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('in the app, says where to point it at another computer', async () => {
     vi.stubGlobal('isTauri', true)
     const { socket } = await openPractice()
@@ -236,6 +293,7 @@ describe('Practice', () => {
 
     socket.drop()
     expect(screen.getByText('Disconnected from the tutor')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Not connected')).toBeDisabled()
 
     await user.click(screen.getByRole('button', { name: /reconnect/i }))
 

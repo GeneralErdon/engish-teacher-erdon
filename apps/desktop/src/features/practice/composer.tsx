@@ -13,6 +13,7 @@ import type { RecorderState } from './use-recorder'
  */
 export function Composer({
   disabled,
+  offline,
   replying,
   recorder,
   meter,
@@ -21,6 +22,8 @@ export function Composer({
   onMic,
 }: {
   disabled: boolean
+  /** Disabled because the connection is lost, not still being made. */
+  offline: boolean
   replying: boolean
   recorder: RecorderState
   /** Microphone level, 0..1. */
@@ -65,7 +68,13 @@ export function Composer({
           rows={1}
           value={text}
           disabled={disabled}
-          placeholder={disabled ? 'Connecting…' : 'Write in English, or press the mic and speak'}
+          placeholder={
+            offline
+              ? 'Not connected'
+              : disabled
+                ? 'Connecting…'
+                : 'Write in English, or press the mic and speak'
+          }
           onChange={(event) => {
             setText(event.target.value)
           }}
