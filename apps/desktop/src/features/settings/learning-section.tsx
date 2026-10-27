@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { api, type Schemas } from '@/lib/api/client'
 import { errorMessage } from '@/lib/api/errors'
 
+import { LoadError } from './load-error'
 import { languageName, learnerQuery } from './use-learner'
 
 type Profile = Schemas['LearnerProfile']
@@ -27,9 +28,7 @@ export function LearningSection() {
 
   if (!learner.data) {
     return learner.isError ? (
-      <p role="alert" className="text-destructive text-sm">
-        {errorMessage(learner.error)}
-      </p>
+      <LoadError error={learner.error} onRetry={() => void learner.refetch()} />
     ) : (
       <Skeleton aria-label="Loading" className="h-24 rounded-xl" />
     )

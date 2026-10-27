@@ -126,12 +126,21 @@ describe('Voice settings', () => {
     expect(section().getByText('http://localhost:8000/v1')).toBeInTheDocument()
   })
 
-  it('reports a status it cannot load', async () => {
-    renderApp(
+  it('reports a status it cannot load, and checks again', async () => {
+    let down = true
+    const { user } = renderApp(
       '/settings',
-      fakeApi({ speech: () => Response.json({ detail: 'boom' }, { status: 500 }) }),
+      fakeApi({
+        speech: () => (down ? Response.json({ detail: 'boom' }, { status: 500 }) : undefined),
+      }),
     )
     expect(await screen.findByText('boom')).toBeInTheDocument()
+
+    down = false
+    await user.click(section().getByRole('button', { name: 'Try again' }))
+
+    expect(await section().findAllByLabelText('Ready')).toHaveLength(2)
+    expect(section().queryByText('boom')).not.toBeInTheDocument()
   })
 
   it('shows a placeholder while checking', async () => {

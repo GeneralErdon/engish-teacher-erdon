@@ -1,6 +1,6 @@
 import { Play } from 'lucide-react'
 import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 
 import { SegmentedControl } from '@/components/segmented-control'
 import { Button } from '@/components/ui/button'
@@ -33,6 +33,7 @@ const GENDERS: [Voice['gender'], string][] = [
 export function VoicePicker({
   model,
   voices,
+  voicesError,
   voice,
   speed,
   disabled,
@@ -42,6 +43,8 @@ export function VoicePicker({
   model: string
   /** Undefined while loading. */
   voices: readonly Voice[] | undefined
+  /** Shown instead of the voices when they could not be loaded. */
+  voicesError?: ReactNode
   voice: string
   speed: number
   disabled: boolean
@@ -58,7 +61,9 @@ export function VoicePicker({
 
   return (
     <div className="flex flex-col gap-4">
-      {voices === undefined ? (
+      {voices === undefined && voicesError ? (
+        voicesError
+      ) : voices === undefined ? (
         <Skeleton aria-label="Loading voices" className="h-20 rounded-xl" />
       ) : voices.length === 0 ? (
         <p className="text-muted-foreground text-xs">This voice model does not list its voices.</p>

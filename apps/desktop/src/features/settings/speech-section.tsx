@@ -4,9 +4,9 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Schemas } from '@/lib/api/client'
-import { errorMessage } from '@/lib/api/errors'
 import { cn } from '@/lib/utils'
 
+import { LoadError } from './load-error'
 import { useSpeechStatus } from './use-speech'
 import { VoiceSettings } from './voice-settings'
 
@@ -39,9 +39,7 @@ function Readiness() {
 
   if (!speech.data) {
     return speech.isError ? (
-      <p role="alert" className="text-destructive text-sm">
-        {errorMessage(speech.error)}
-      </p>
+      <LoadError error={speech.error} onRetry={() => void speech.refetch()} />
     ) : (
       <Skeleton aria-label="Loading" className="h-20 rounded-xl" />
     )

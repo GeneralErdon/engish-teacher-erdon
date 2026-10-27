@@ -307,10 +307,33 @@ describe('Speech recognition models', () => {
     expect(await screen.findByText('Another download is running.')).toBeInTheDocument()
   })
 
-  it('reports settings it cannot load', async () => {
-    renderApp('/settings', fakeApi({ speechSettings: failure(500, 'no settings') }))
-
+  it('reports settings it cannot load, and loads them again', async () => {
+    let down = true
+    const { user } = renderApp(
+      '/settings',
+      fakeApi({ speechSettings: () => (down ? failure(500, 'no settings')() : undefined) }),
+    )
     expect(await screen.findByText('no settings')).toBeInTheDocument()
+
+    down = false
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+
+    expect(await recognition()).toBeInTheDocument()
+  })
+
+  it('reports voices it cannot load, and loads them again', async () => {
+    let down = true
+    const { user } = renderApp(
+      '/settings',
+      fakeApi({ voices: () => (down ? failure(502, 'Speaches is down')() : undefined) }),
+    )
+    expect(await screen.findByText('Speaches is down')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Loading voices')).not.toBeInTheDocument()
+
+    down = false
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+
+    expect(await screen.findByRole('radio', { name: 'Heart' })).toBeInTheDocument()
   })
 
   it('shows a placeholder while loading', async () => {

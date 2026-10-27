@@ -7,6 +7,7 @@ import type { Schemas } from '@/lib/api/client'
 import { errorMessage } from '@/lib/api/errors'
 
 import { EngineChoice } from './engine-choice'
+import { LoadError } from './load-error'
 import { ModelList } from './speech-models'
 import { TurnLength } from './turn-length'
 import {
@@ -37,9 +38,13 @@ export function VoiceSettings() {
 
   if (!settings.data || !catalogue.data) {
     return settings.isError || catalogue.isError ? (
-      <p role="alert" className="text-destructive text-sm">
-        {errorMessage(settings.isError ? settings.error : catalogue.error)}
-      </p>
+      <LoadError
+        error={settings.isError ? settings.error : catalogue.error}
+        onRetry={() => {
+          if (settings.isError) void settings.refetch()
+          if (catalogue.isError) void catalogue.refetch()
+        }}
+      />
     ) : (
       <Skeleton aria-label="Loading voice settings" className="h-24 rounded-xl" />
     )
@@ -174,6 +179,11 @@ export function VoiceSettings() {
         <VoicePicker
           model={view.tts_model}
           voices={voices.data}
+          voicesError={
+            voices.isError && (
+              <LoadError error={voices.error} onRetry={() => void voices.refetch()} />
+            )
+          }
           voice={view.tts_voice}
           speed={view.tts_speed}
           disabled={save.isPending}

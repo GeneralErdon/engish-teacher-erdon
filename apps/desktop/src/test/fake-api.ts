@@ -169,7 +169,11 @@ export const VOICES: Schemas['Voice'][] = [
   { id: 'bm_george', name: 'George', accent: 'british', gender: 'male' },
 ]
 
-type Reply = Response | (() => Response | Promise<Response>)
+/**
+ * What a route answers instead of the fake's own answer. A function gets the request; returning
+ * `undefined` lets the fake answer after all (say, once the api is back).
+ */
+type Reply = Response | ((request: Request) => Response | Promise<Response> | undefined)
 
 interface Overrides {
   health?: Reply
@@ -246,9 +250,13 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
     },
   }
 
-  const reply = (override: Reply | undefined, fallback: () => Response | Promise<Response>) => {
+  const reply = (
+    request: Request,
+    override: Reply | undefined,
+    fallback: () => Response | Promise<Response>,
+  ) => {
     if (override === undefined) return fallback()
-    return typeof override === 'function' ? override() : override.clone()
+    return typeof override === 'function' ? (override(request) ?? fallback()) : override.clone()
   }
 
   const setModel = (key: string, change: Partial<Schemas['SpeechModel']>) => {
@@ -301,33 +309,33 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
     }
     switch (route) {
       case 'GET /healthz':
-        return reply(overrides.health, () =>
+        return reply(request, overrides.health, () =>
           json({ status: 'ok', service: 'api', version: '0.1.0' }),
         )
       case 'GET /v1/speech/status':
-        return reply(overrides.speech, () => json(api.speech))
+        return reply(request, overrides.speech, () => json(api.speech))
       case 'GET /v1/learner':
-        return reply(overrides.learner, () => json(api.learner))
+        return reply(request, overrides.learner, () => json(api.learner))
       case 'PUT /v1/learner':
-        return reply(overrides.saveLearner, () => {
+        return reply(request, overrides.saveLearner, () => {
           const body = sent.get(route)?.at(-1) as Schemas['LearnerProfile']
           api.learner = { ...api.learner, ...body, source: 'saved' }
           return json(api.learner)
         })
       case 'GET /v1/llm/providers':
-        return reply(overrides.providers, () => json(PROVIDERS))
+        return reply(request, overrides.providers, () => json(PROVIDERS))
       case 'GET /v1/llm/settings':
-        return reply(overrides.settings, () => json(api.settings))
+        return reply(request, overrides.settings, () => json(api.settings))
       case 'POST /v1/llm/models':
-        return reply(overrides.models, () =>
+        return reply(request, overrides.models, () =>
           json({ models: ['gemma4:31b', 'gpt-oss:120b', 'qwen3:8b'] }),
         )
       case 'POST /v1/llm/test':
-        return reply(overrides.test, () =>
+        return reply(request, overrides.test, () =>
           json({ ok: true, latency_ms: 842, reply: 'Hello! Ready to practise?', error: null }),
         )
       case 'PUT /v1/llm/settings':
-        return reply(overrides.save, () => {
+        return reply(request, overrides.save, () => {
           const body = sent.get(route)?.at(-1) as {
             kind: Kind
             base_url: string
@@ -352,12 +360,12 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
           return json(api.settings)
         })
       case 'DELETE /v1/llm/settings':
-        return reply(overrides.reset, () => {
+        return reply(request, overrides.reset, () => {
           api.settings = structuredClone(ENVIRONMENT)
           return json(api.settings)
         })
       case 'GET /v1/speech/settings':
-        return reply(overrides.speechSettings, () => json(api.speechSettings))
+        return reply(request, overrides.speechSettings, () => json(api.speechSettings))
       case 'PUT /v1/speech/settings': {
         const body = sent.get(route)?.at(-1) as Schemas['SpeechSettings']
         api.speechSettings = { ...api.speechSettings, ...body, source: 'saved' }
@@ -367,14 +375,15 @@ export function fakeApi(overrides: Overrides = {}): FakeApi {
         return json(api.speechSettings)
       }
       case 'GET /v1/speech/models':
-        return reply(overrides.speechModels, () => {
+        return reply(request, overrides.speechModels, () => {
           advanceDownloads()
           return json(api.speechModels)
         })
       case 'GET /v1/speech/voices':
-        return reply(overrides.voices, () => json(api.voices))
+        return reply(request, overrides.voices, () => json(api.voices))
       case 'POST /v1/speech/preview':
         return reply(
+          request,
           overrides.preview,
           () => new Response(new Blob(['RIFF']), { headers: { 'Content-Type': 'audio/wav' } }),
         )
@@ -415,3 +424,11 @@ export const unreachable = (): Promise<Response> => Promise.reject(new TypeError
 
 /** Never answers: the UI stays in its loading state. */
 export const pending = (): Promise<Response> => new Promise(() => undefined)
+
+/** Never answers, like a stuck api: only the UI giving up (aborting the request) ends it. */
+export const silent = (request: Request): Promise<Response> =>
+  new Promise((_resolve, reject) => {
+    request.signal.addEventListener('abort', () => {
+      reject(request.signal.reason as Error)
+    })
+  })
