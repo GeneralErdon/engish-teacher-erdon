@@ -27,6 +27,8 @@ export interface Turn {
 
 export interface ConversationState {
   status: 'connecting' | 'open' | 'closed'
+  /** Closed because the conversation did not start in time (`SESSION_START_TIMEOUT_MS`). */
+  timedOut?: boolean
   session?: Schemas['SessionReady']
   turns: Turn[]
   /** The turn whose reply was last spoken aloud. */
@@ -42,7 +44,16 @@ export interface ConversationState {
 }
 
 type Action =
-  { type: 'status'; status: ConversationState['status'] } | { type: 'transcribing' } | ServerEvent
+  | { type: 'status'; status: ConversationState['status'] }
+  | { type: 'timeout' }
+  | { type: 'transcribing' }
+  | ServerEvent
+
+/**
+ * How long the api has to start a conversation (`session.ready`) before the UI gives up and
+ * offers to reconnect, instead of "Connecting…" forever. Starting loads the GPU model, if any.
+ */
+export const SESSION_START_TIMEOUT_MS = 30_000
 
 /**
  * Errors that end a transcription without a turn. `audio_too_long` is gone from the api (long
@@ -66,7 +77,9 @@ function updateTurn(state: ConversationState, id: string, change: (turn: Turn) =
 export function reducer(state: ConversationState, action: Action): ConversationState {
   switch (action.type) {
     case 'status':
-      return { ...state, status: action.status }
+      return { ...state, status: action.status, timedOut: false }
+    case 'timeout':
+      return { ...state, status: 'closed', timedOut: true }
     case 'transcribing':
       return { ...state, transcribing: true }
     case 'session.ready':
@@ -184,6 +197,12 @@ export function useConversation({
     const ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
     socket.current = ws
+    const giveUp = setTimeout(() => {
+      started.current = false
+      ws.onclose = null
+      ws.close()
+      dispatch({ type: 'timeout' })
+    }, SESSION_START_TIMEOUT_MS)
     ws.onopen = () => {
       dispatch({ type: 'status', status: 'open' })
       ws.send(JSON.stringify({ type: 'session.start', v: 1, topic: null, speak: speakRef.current }))
@@ -195,6 +214,7 @@ export function useConversation({
         return
       }
       const event = JSON.parse(message.data) as ServerEvent
+      if (event.type === 'session.ready') clearTimeout(giveUp)
       if (event.type === 'transcript.final') lastTurn.current = event.turn_id
       if (event.type === 'assistant.audio.started' && event.turn_id !== muted.current) {
         voice.current = { turnId: event.turn_id, sampleRate: event.sample_rate }
@@ -203,10 +223,12 @@ export function useConversation({
       dispatch(event)
     }
     ws.onclose = () => {
+      clearTimeout(giveUp)
       started.current = false
       dispatch({ type: 'status', status: 'closed' })
     }
     return () => {
+      clearTimeout(giveUp)
       started.current = false
       ws.onclose = null
       ws.close()

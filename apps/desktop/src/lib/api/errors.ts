@@ -9,6 +9,14 @@ export class ApiError extends Error {
   }
 }
 
+/** The api did not answer in time: it is running, but stuck or overloaded. */
+export class RequestTimeout extends Error {
+  constructor(ms: number) {
+    super(`The api did not answer within ${String(ms / 1000)} s.`)
+    this.name = 'RequestTimeout'
+  }
+}
+
 interface ValidationIssue {
   msg: string
 }

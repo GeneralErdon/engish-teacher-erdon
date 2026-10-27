@@ -1,7 +1,7 @@
-import { screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, screen, within } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
-import { fakeApi, pending } from '@/test/fake-api'
+import { fakeApi, pending, silent } from '@/test/fake-api'
 import { renderApp } from '@/test/render-app'
 
 import { languageName } from './use-learner'
@@ -51,6 +51,27 @@ describe('Learning settings', () => {
     renderApp('/settings', fakeApi({ learner: failure(500, 'boom') }))
 
     expect(await screen.findByText('boom')).toBeInTheDocument()
+  })
+
+  it('says when the api does not answer, instead of loading forever, and tries again', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      let stuck = true
+      const { user } = renderApp(
+        '/settings',
+        fakeApi({ learner: (request) => (stuck ? silent(request) : undefined) }),
+      )
+      await screen.findByRole('heading', { name: 'Learning' })
+      await act(() => vi.advanceTimersByTimeAsync(20_000))
+
+      expect(await screen.findByText('The api did not answer within 20 s.')).toBeInTheDocument()
+
+      stuck = false
+      await user.click(screen.getByRole('button', { name: 'Try again' }))
+      expect(await screen.findByRole('radiogroup', { name: 'Level' })).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows a placeholder while loading', async () => {

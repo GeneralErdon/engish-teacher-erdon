@@ -1,33 +1,55 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { fakeApi, type FakeApi } from '@/test/fake-api'
 import { renderApp } from '@/test/render-app'
 
-import { playPreview } from './use-speech'
-
 const failure = (status: number, detail: string) => () => Response.json({ detail }, { status })
 
+/** The object URLs of the samples played, in order. */
 const played: string[] = []
+/** The browser's `Audio`: records what plays; `end()` plays a sample to its end. */
 class FakeAudio {
-  static ended: (() => void) | undefined
+  static instances: FakeAudio[] = []
   readonly src: string
+  paused = true
+  private ended: (() => void) | undefined
   constructor(src: string) {
     this.src = src
+    FakeAudio.instances.push(this)
   }
   addEventListener(_type: string, listener: () => void) {
-    FakeAudio.ended = listener
+    this.ended = listener
   }
   play() {
     played.push(this.src)
+    this.paused = false
     return Promise.resolve()
   }
+  pause() {
+    this.paused = true
+  }
+  end() {
+    this.paused = true
+    act(() => {
+      this.ended?.()
+    })
+  }
+}
+
+/** The sample `n` (from 1) the UI made a sound from. */
+function audio(n: number) {
+  const made = FakeAudio.instances[n - 1]
+  if (!made) throw new Error(`no audio ${String(n)}`)
+  return made
 }
 
 beforeEach(() => {
   played.length = 0
+  FakeAudio.instances = []
   vi.stubGlobal('Audio', FakeAudio)
-  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview')
+  let urls = 0
+  vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:${String(++urls)}`)
   URL.revokeObjectURL = vi.fn()
 })
 afterEach(() => {
@@ -307,10 +329,33 @@ describe('Speech recognition models', () => {
     expect(await screen.findByText('Another download is running.')).toBeInTheDocument()
   })
 
-  it('reports settings it cannot load', async () => {
-    renderApp('/settings', fakeApi({ speechSettings: failure(500, 'no settings') }))
-
+  it('reports settings it cannot load, and loads them again', async () => {
+    let down = true
+    const { user } = renderApp(
+      '/settings',
+      fakeApi({ speechSettings: () => (down ? failure(500, 'no settings')() : undefined) }),
+    )
     expect(await screen.findByText('no settings')).toBeInTheDocument()
+
+    down = false
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+
+    expect(await recognition()).toBeInTheDocument()
+  })
+
+  it('reports voices it cannot load, and loads them again', async () => {
+    let down = true
+    const { user } = renderApp(
+      '/settings',
+      fakeApi({ voices: () => (down ? failure(502, 'Speaches is down')() : undefined) }),
+    )
+    expect(await screen.findByText('Speaches is down')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Loading voices')).not.toBeInTheDocument()
+
+    down = false
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+
+    expect(await screen.findByRole('radio', { name: 'Heart' })).toBeInTheDocument()
   })
 
   it('shows a placeholder while loading', async () => {
@@ -391,14 +436,16 @@ describe('Tutor voice', () => {
     await user.click(within(british).getByRole('button', { name: 'Preview Emma' }))
 
     await waitFor(() => {
-      expect(played).toEqual(['blob:preview'])
+      expect(played).toEqual(['blob:1'])
     })
     expect(api.sent.get('POST /v1/speech/preview')).toEqual([
       { model: 'speaches-ai/Kokoro-82M-v1.0-ONNX', voice: 'bf_emma', speed: 0.95 },
     ])
-    FakeAudio.ended?.()
+    expect(within(british).getByRole('button', { name: 'Stop preview of Emma' })).toBeVisible()
+    audio(1).end()
+    expect(await within(british).findByRole('button', { name: 'Preview Emma' })).toBeVisible()
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:1')
 
     await user.click(within(british).getByRole('radio', { name: 'George' }))
     await waitFor(() => {
@@ -441,6 +488,123 @@ describe('Tutor voice', () => {
     await waitFor(() => {
       expect(api.sent.get('POST /v1/speech/preview')?.at(-1)).toMatchObject({ speed: 1.2 })
     })
+  })
+
+  it('plays one preview at a time: another voice stops the one playing', async () => {
+    const { user } = renderApp('/settings')
+
+    await user.click(await screen.findByRole('button', { name: 'Preview Heart' }))
+    await waitFor(() => {
+      expect(played).toEqual(['blob:1'])
+    })
+    await user.click(screen.getByRole('button', { name: 'Preview Emma' }))
+
+    await waitFor(() => {
+      expect(played).toEqual(['blob:1', 'blob:2'])
+    })
+    expect(audio(1).paused).toBe(true)
+    expect(audio(2).paused).toBe(false)
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:1')
+    expect(screen.getByRole('button', { name: 'Preview Heart' })).toBeVisible()
+  })
+
+  it('stops the preview playing when pressed again, instead of asking for it twice', async () => {
+    const { user, api } = renderApp('/settings')
+
+    await user.click(await screen.findByRole('button', { name: 'Preview Heart' }))
+    await waitFor(() => {
+      expect(played).toEqual(['blob:1'])
+    })
+    await user.click(screen.getByRole('button', { name: 'Stop preview of Heart' }))
+
+    expect(audio(1).paused).toBe(true)
+    expect(screen.getByRole('button', { name: 'Preview Heart' })).toBeVisible()
+    expect(api.sent.get('POST /v1/speech/preview')).toHaveLength(1)
+  })
+
+  it('drops a preview still loading when another voice is pressed', async () => {
+    const { user, api } = renderApp('/settings')
+    const previews: Request[] = []
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    vi.stubGlobal('fetch', async (request: Request) => {
+      if (new URL(request.url).pathname === '/v1/speech/preview' && previews.push(request) === 1) {
+        await held
+      }
+      return api.fetch(request)
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Preview Heart' }))
+    expect(await screen.findByRole('button', { name: 'Stop preview of Heart' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Preview Emma' }))
+    await waitFor(() => {
+      expect(played).toEqual(['blob:1'])
+    })
+    release()
+
+    await waitFor(() => {
+      expect(previews[0]?.signal.aborted).toBe(true)
+    })
+    expect(FakeAudio.instances).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Preview Heart' })).toBeVisible()
+  })
+
+  it('plays a sample heard before at once; another speed is another sample', async () => {
+    const { user, api } = renderApp('/settings')
+
+    await user.click(await screen.findByRole('button', { name: 'Preview Heart' }))
+    await waitFor(() => {
+      expect(played).toHaveLength(1)
+    })
+    audio(1).end()
+    await user.click(await screen.findByRole('button', { name: 'Preview Heart' }))
+    await waitFor(() => {
+      expect(played).toHaveLength(2)
+    })
+    expect(api.sent.get('POST /v1/speech/preview')).toHaveLength(1)
+
+    const speed = screen.getByRole('radiogroup', { name: 'Speed' })
+    await user.click(within(speed).getByRole('radio', { name: '1.2×' }))
+    await waitFor(() => {
+      expect(within(speed).getByRole('radio', { name: '1.2×' })).toBeChecked()
+    })
+    await user.click(screen.getByRole('button', { name: 'Stop preview of Heart' }))
+    await user.click(screen.getByRole('button', { name: 'Preview Heart' }))
+    await waitFor(() => {
+      expect(played).toHaveLength(3)
+    })
+    expect(api.sent.get('POST /v1/speech/preview')).toHaveLength(2)
+  })
+
+  it('stops the preview when leaving Settings', async () => {
+    const { user, router } = renderApp('/settings')
+
+    await user.click(await screen.findByRole('button', { name: 'Preview Heart' }))
+    await waitFor(() => {
+      expect(played).toHaveLength(1)
+    })
+    await act(() => router.navigate({ to: '/' }))
+
+    expect(audio(1).paused).toBe(true)
+  })
+
+  it('says when the browser will not play a sample', async () => {
+    const { user } = renderApp('/settings')
+    // A DOMException in browsers, where it is an Error (in jsdom it is not).
+    const blocked = Object.assign(new Error('The browser blocked the sound.'), {
+      name: 'NotAllowedError',
+    })
+    vi.spyOn(FakeAudio.prototype, 'play').mockRejectedValue(blocked)
+
+    await user.click(await screen.findByRole('button', { name: 'Preview Heart' }))
+
+    expect(await screen.findByText('The browser blocked the sound.')).toBeInTheDocument()
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:1')
+    expect(screen.getByRole('button', { name: 'Preview Heart' })).toBeVisible()
   })
 
   it('says when a preview fails', async () => {
@@ -618,17 +782,6 @@ describe('Voice section', () => {
     const ready = screen.getAllByLabelText('Ready')[0]
     const list = await recognition()
     expect(ready?.compareDocumentPosition(list) === Node.DOCUMENT_POSITION_FOLLOWING).toBe(true)
-  })
-})
-
-describe('playPreview', () => {
-  it('requests the sample as audio and plays it', async () => {
-    const api = fakeApi()
-    renderApp('/settings', api)
-
-    await playPreview({ model: 'm', voice: 'v', speed: 1 })
-
-    expect(played).toEqual(['blob:preview'])
   })
 })
 

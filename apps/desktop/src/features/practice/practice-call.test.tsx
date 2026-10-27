@@ -357,6 +357,26 @@ describe('Call mode', () => {
     expect(screen.queryByRole('button', { name: /start a call/i })).not.toBeInTheDocument()
   })
 
+  it('ends the call when the connection drops, so the page can offer to reconnect', async () => {
+    const { socket, user } = await startCall()
+
+    socket.drop()
+
+    expect(screen.queryByRole('dialog', { name: 'Call with your tutor' })).not.toBeInTheDocument()
+    expect(screen.getByText('Disconnected from the tutor')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /reconnect/i }))
+    FakeSocket.last.open()
+    FakeSocket.last.emit({
+      type: 'session.ready',
+      v: 1,
+      level: 'B1',
+      provider: 'Ollama Cloud',
+      model: 'm',
+    })
+    expect(screen.queryByRole('dialog', { name: 'Call with your tutor' })).not.toBeInTheDocument()
+  })
+
   it('makes the orb follow the voice of whoever talks', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {

@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 
-import { api, fetchClient, type Schemas } from '@/lib/api/client'
+import { api } from '@/lib/api/client'
 
 export const DOWNLOAD_POLL_MS = 1000
 
@@ -74,19 +74,4 @@ export function useModelActions() {
   })
   const uninstall = api.useMutation('delete', '/v1/speech/models/{key}', { onSuccess: refresh })
   return { download, cancel, uninstall }
-}
-
-/** A sample sentence in the chosen voice, played through the browser. */
-export async function playPreview(body: Schemas['VoicePreview']): Promise<void> {
-  const { data } = await fetchClient.POST('/v1/speech/preview', { body, parseAs: 'blob' })
-  const url = URL.createObjectURL(data as Blob)
-  const audio = new Audio(url)
-  audio.addEventListener(
-    'ended',
-    () => {
-      URL.revokeObjectURL(url)
-    },
-    { once: true },
-  )
-  await audio.play()
 }

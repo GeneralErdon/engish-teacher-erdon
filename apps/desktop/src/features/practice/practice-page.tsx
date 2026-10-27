@@ -20,7 +20,7 @@ import { inApp } from '@/lib/platform'
 import { CallView } from './call-view'
 import { Composer } from './composer'
 import { TurnView } from './turn-view'
-import { useConversation } from './use-conversation'
+import { SESSION_START_TIMEOUT_MS, useConversation } from './use-conversation'
 import { useRecorder } from './use-recorder'
 import { useVoiceReplies } from './use-voice-replies'
 
@@ -125,10 +125,22 @@ export function PracticePage() {
       {status === 'closed' && (
         <Alert variant="destructive">
           <WifiOff />
-          <AlertTitle>Disconnected from the tutor</AlertTitle>
+          <AlertTitle>
+            {conversation.timedOut ? 'The tutor did not answer' : 'Disconnected from the tutor'}
+          </AlertTitle>
           <AlertDescription className="flex flex-col items-start gap-3">
             <span>
-              Is the backend running? Start it with <code>just dev-api</code>.
+              {conversation.timedOut ? (
+                <>
+                  The conversation did not start within {String(SESSION_START_TIMEOUT_MS / 1000)}{' '}
+                  seconds. Try again; if it keeps happening, restart the backend (
+                  <code>just dev-api</code>).
+                </>
+              ) : (
+                <>
+                  Is the backend running? Start it with <code>just dev-api</code>.
+                </>
+              )}
               {inApp() && (
                 <>
                   {' '}
@@ -140,7 +152,15 @@ export function PracticePage() {
                 </>
               )}
             </span>
-            <Button size="sm" variant="outline" onClick={conversation.reconnect}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                // The call ended with the connection: the new conversation starts in the chat.
+                setInCall(false)
+                conversation.reconnect()
+              }}
+            >
               <RotateCw /> Reconnect
             </Button>
           </AlertDescription>
@@ -217,6 +237,7 @@ export function PracticePage() {
         )}
         <Composer
           disabled={!session || status !== 'open'}
+          offline={status === 'closed'}
           replying={busy}
           recorder={recorder.state}
           meter={recorder.meter}
@@ -226,7 +247,8 @@ export function PracticePage() {
         />
       </div>
 
-      {inCall && <CallView conversation={conversation} onEnd={endCall} />}
+      {/* A call cannot go on without the connection: the page offers to reconnect instead. */}
+      {inCall && status !== 'closed' && <CallView conversation={conversation} onEnd={endCall} />}
     </div>
   )
 }
