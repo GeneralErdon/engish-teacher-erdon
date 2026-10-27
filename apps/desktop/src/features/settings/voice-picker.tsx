@@ -1,15 +1,14 @@
-import { Play } from 'lucide-react'
+import { Loader2, Play, Square } from 'lucide-react'
 import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
 import { SegmentedControl } from '@/components/segmented-control'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Schemas } from '@/lib/api/client'
-import { errorMessage } from '@/lib/api/errors'
 import { cn } from '@/lib/utils'
 
-import { playPreview } from './use-speech'
+import { usePreview } from './use-preview'
 
 type Voice = Schemas['Voice']
 
@@ -29,7 +28,10 @@ const GENDERS: [Voice['gender'], string][] = [
   [null, 'Other'],
 ]
 
-/** The voices of the voice model, grouped by accent and gender, each with a preview; and speed. */
+/**
+ * The voices of the voice model, grouped by accent and gender, each with a preview (one plays at
+ * a time; its button stops it); and speed.
+ */
 export function VoicePicker({
   model,
   voices,
@@ -51,13 +53,7 @@ export function VoicePicker({
   onVoice: (voice: string) => void
   onSpeed: (speed: number) => void
 }) {
-  const [failure, setFailure] = useState<string>()
-  const preview = (id: string) => {
-    setFailure(undefined)
-    playPreview({ model, voice: id, speed }).catch((error: unknown) => {
-      setFailure(errorMessage(error))
-    })
-  }
+  const preview = usePreview()
 
   return (
     <div className="flex flex-col gap-4">
@@ -92,32 +88,44 @@ export function VoicePicker({
                       className="flex flex-wrap items-center gap-2"
                     >
                       <span className="text-muted-foreground w-14 text-xs">{genderLabel}</span>
-                      {group.map((v) => (
-                        <span
-                          key={v.id}
-                          className={cn(
-                            'flex items-center rounded-lg border',
-                            v.id === voice && 'border-primary',
-                          )}
-                        >
-                          <RadioGroupPrimitive.Item
-                            value={v.id}
-                            className="focus-visible:ring-ring/50 data-[state=checked]:font-medium rounded-l-lg px-3 py-1.5 text-sm outline-none focus-visible:ring-[3px] disabled:opacity-60"
+                      {group.map((v) => {
+                        const previewing =
+                          preview.current?.voice === v.id ? preview.current : undefined
+                        return (
+                          <span
+                            key={v.id}
+                            className={cn(
+                              'flex items-center rounded-lg border',
+                              v.id === voice && 'border-primary',
+                            )}
                           >
-                            {v.name}
-                          </RadioGroupPrimitive.Item>
-                          <Button
-                            size="icon-xs"
-                            variant="ghost"
-                            aria-label={`Preview ${v.name}`}
-                            onClick={() => {
-                              preview(v.id)
-                            }}
-                          >
-                            <Play />
-                          </Button>
-                        </span>
-                      ))}
+                            <RadioGroupPrimitive.Item
+                              value={v.id}
+                              className="focus-visible:ring-ring/50 data-[state=checked]:font-medium rounded-l-lg px-3 py-1.5 text-sm outline-none focus-visible:ring-[3px] disabled:opacity-60"
+                            >
+                              {v.name}
+                            </RadioGroupPrimitive.Item>
+                            <Button
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label={
+                                previewing ? `Stop preview of ${v.name}` : `Preview ${v.name}`
+                              }
+                              onClick={() => {
+                                preview.toggle({ model, voice: v.id, speed })
+                              }}
+                            >
+                              {!previewing ? (
+                                <Play />
+                              ) : previewing.playing ? (
+                                <Square className="fill-current" />
+                              ) : (
+                                <Loader2 className="animate-spin" />
+                              )}
+                            </Button>
+                          </span>
+                        )
+                      })}
                     </div>
                   )
                 })}
@@ -126,9 +134,9 @@ export function VoicePicker({
           })}
         </RadioGroupPrimitive.Root>
       )}
-      {failure && (
+      {preview.error && (
         <p role="alert" className="text-destructive text-xs">
-          {failure}
+          {preview.error}
         </p>
       )}
       <div className="flex flex-col gap-2">
