@@ -195,7 +195,7 @@ services:
 
   # TODO(Phase 3): pull VT_LLM_MODEL into Ollama on first start (`ollama pull`).
   llm-nvidia:
-    image: ollama/ollama:0.40.6
+    image: ollama/ollama:0.40.13
     profiles: [nvidia]
     networks: { default: { aliases: [llm] } }
     environment:
